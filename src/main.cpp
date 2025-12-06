@@ -117,10 +117,10 @@ void enterDeepSleep() {
   uiManager.showSleepScreen();
 
   // Enter deep sleep mode
-  einkDisplay.deepSleep();
-
-  Serial.println("Entering deep sleep mode...");
-  delay(10);  // Allow serial buffer to empty
+  // this seems to start the display and leads to grayish screen somehow???
+  // einkDisplay.deepSleep();
+  // Serial.println("Entering deep sleep mode...");
+  // delay(10);  // Allow serial buffer to empty
 
   // Enable wakeup on power button (active LOW)
   pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
