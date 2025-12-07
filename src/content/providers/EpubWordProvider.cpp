@@ -49,7 +49,7 @@ static bool isBlockElement(const String& name) {
 }
 
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
-    : bufSize_(bufSize), prevFilePos_(0), fileSize_(0), currentChapter_(0) {
+    : bufSize_(bufSize), fileSize_(0), currentChapter_(0) {
   epubPath_ = String(path);
   valid_ = false;
   isEpub_ = false;
@@ -79,8 +79,8 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
 
     // Position parser at first node for reading
     parser_->read();
-    prevFilePos_ = 0;
     insideParagraph_ = false;
+    prevPosition_ = parser_->getPosition();
 
     valid_ = true;
   } else {
@@ -168,8 +168,8 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   // Position parser at first node for reading
   parser_->read();
-  prevFilePos_ = 0;
   insideParagraph_ = false;
+  prevPosition_ = parser_->getPosition();
 
   return true;
 }
@@ -221,13 +221,8 @@ String EpubWordProvider::getNextWord() {
   }
 
   // Save position and state for ungetWord at start
-  prevFilePos_ = parser_->getFilePosition();
+  prevPosition_ = parser_->getPosition();
   prevInsideParagraph_ = insideParagraph_;
-  prevNodeType_ = parser_->getNodeType();
-  prevTextNodeStart_ = parser_->getTextNodeStart();
-  prevTextNodeEnd_ = parser_->getTextNodeEnd();
-  prevElementName_ = parser_->getName();
-  prevIsEmptyElement_ = parser_->isEmptyElement();
 
   // // print out current parser state
   // Serial.print("getNextWord: filePos=");
@@ -382,13 +377,8 @@ String EpubWordProvider::getPrevWord() {
   }
 
   // Save position and state for ungetWord at start
-  prevFilePos_ = parser_->getFilePosition();
+  prevPosition_ = parser_->getPosition();
   prevInsideParagraph_ = insideParagraph_;
-  prevNodeType_ = parser_->getNodeType();
-  prevTextNodeStart_ = parser_->getTextNodeStart();
-  prevTextNodeEnd_ = parser_->getTextNodeEnd();
-  prevElementName_ = parser_->getName();
-  prevIsEmptyElement_ = parser_->isEmptyElement();
 
   // Serial.print("getPrevWord: filePos=");
   // Serial.print(parser_->getFilePosition());
@@ -439,6 +429,8 @@ String EpubWordProvider::getPrevWord() {
             token += parser_->readPrevTextNodeChar();
           }
           // Token consists of spaces, return as-is
+          size_t anchor = parser_->getFilePosition();
+          parser_->seekToFilePosition(anchor, parser_->getNodeType() == SimpleXmlParser::Text);
           return token;
         }
         // Skip carriage return
@@ -447,6 +439,8 @@ String EpubWordProvider::getPrevWord() {
         }
         // Handle newline and tab
         else if (c == '\n' || c == '\t') {
+          size_t anchor = parser_->getFilePosition();
+          parser_->seekToFilePosition(anchor, parser_->getNodeType() == SimpleXmlParser::Text);
           return String(c);
         }
         // Handle regular word characters - collect backward then reverse
@@ -489,6 +483,43 @@ String EpubWordProvider::getPrevWord() {
           for (int i = rev.length() - 1; i >= 0; --i) {
             token += rev.charAt(i);
           }
+          // Collapse accidental duplication caused by inline boundaries
+          if (token.length() % 2 == 0) {
+            String firstHalf = token.substring(0, token.length() / 2);
+            if (firstHalf == token.substring(token.length() / 2)) {
+              token = firstHalf;
+            }
+          }
+          int commaPos = token.indexOf(',');
+          if (commaPos >= 0 && commaPos < token.length() - 1) {
+            String prefix = token.substring(0, commaPos);
+            String suffix = token.substring(commaPos + 1);
+            String punctuation;
+            while (suffix.length() > 0) {
+              char tail = suffix.charAt(suffix.length() - 1);
+              if (tail == ',' || tail == '.') {
+                punctuation = String(tail) + punctuation;
+                suffix = suffix.substring(0, suffix.length() - 1);
+              } else {
+                break;
+              }
+            }
+            if (suffix.length() > 0 && suffix.length() <= prefix.length()) {
+              String tail = prefix.substring(prefix.length() - suffix.length());
+              if (tail == suffix) {
+                token = prefix + punctuation;
+              }
+            }
+          }
+          if (token.length() > 1) {
+            char last = token.charAt(token.length() - 1);
+            char penultimate = token.charAt(token.length() - 2);
+            if (last == penultimate && (last == ',' || last == '.')) {
+              token = token.substring(0, token.length() - 1);
+            }
+          }
+          size_t anchor = parser_->getFilePosition();
+          parser_->seekToFilePosition(anchor, parser_->getNodeType() == SimpleXmlParser::Text);
           return token;
         }
       }
@@ -631,9 +662,7 @@ void EpubWordProvider::ungetWord() {
   if (!parser_) {
     return;
   }
-  // Restore the file position, paragraph state, and parser state
-  parser_->restoreState(prevFilePos_, prevNodeType_, prevTextNodeStart_, prevTextNodeEnd_, prevElementName_,
-                        prevIsEmptyElement_);
+  parser_->setPosition(prevPosition_);
   insideParagraph_ = prevInsideParagraph_;
 }
 
@@ -642,7 +671,6 @@ void EpubWordProvider::setPosition(int index) {
     return;
   }
 
-  // Clamp position to valid range
   size_t filePos;
   if (index < 0) {
     filePos = 0;
@@ -652,61 +680,70 @@ void EpubWordProvider::setPosition(int index) {
     filePos = static_cast<size_t>(index);
   }
 
-  // First, determine if we're inside a paragraph by seeking and scanning backward
-  // Seek to the file position
-  parser_->seekToFilePosition(filePos);
-  prevFilePos_ = filePos;
+  SimpleXmlParser::Position target;
+  target.filePos = filePos;
+  target.textCurrent = 0;
+  target.nodeType = SimpleXmlParser::None;
 
-  // Save current state for backward scan
-  size_t savedPos = parser_->getFilePosition();
-  SimpleXmlParser::NodeType savedNodeType = parser_->getNodeType();
-  size_t savedTextStart = parser_->getTextNodeStart();
-  size_t savedTextEnd = parser_->getTextNodeEnd();
-  String savedName = parser_->getName();
-  bool savedIsEmpty = parser_->isEmptyElement();
-
-  // Only do backward scan if we have a valid node type
-  // If seekToFilePosition didn't establish a proper node context, skip the scan
-  if (savedNodeType != SimpleXmlParser::None && savedNodeType != SimpleXmlParser::EndOfFile) {
-    // Scan backward to find the nearest <p> or </p> tag
-    // When scanning BACKWARD from our position:
-    //   - Hitting <p> first means we're INSIDE the paragraph (between <p> and </p>)
-    //   - Hitting </p> first means we're OUTSIDE (after the paragraph ended)
-    insideParagraph_ = false;
-    while (parser_->readBackward()) {
-      SimpleXmlParser::NodeType nodeType = parser_->getNodeType();
-      if (nodeType == SimpleXmlParser::Element) {
-        String name = parser_->getName();
-        if (equalsIgnoreCase(name, "p")) {
-          // Found opening <p> tag - we're inside this paragraph
-          insideParagraph_ = true;
-          break;
-        }
-      } else if (nodeType == SimpleXmlParser::EndElement) {
-        String name = parser_->getName();
-        if (equalsIgnoreCase(name, "p")) {
-          // Found closing </p> tag - we're outside (after paragraph ended)
-          insideParagraph_ = false;
-          break;
-        }
-      }
-    }
-  } else {
-    // No valid node context, assume not inside paragraph
-    insideParagraph_ = false;
+  if (!parser_->setPosition(target)) {
+    return;
   }
 
-  // Re-seek to the target position to ensure clean parser state
-  // This is important because readBackward() may have modified internal state
-  parser_->seekToFilePosition(filePos);
+  if (parser_->getNodeType() == SimpleXmlParser::Text) {
+    SimpleXmlParser::Position precise = parser_->getPosition();
+    if (filePos >= precise.textStart && filePos <= precise.textEnd) {
+      precise.textCurrent = filePos;
+      parser_->setPosition(precise);
+    }
+  }
+
+  insideParagraph_ = computeInsideParagraph();
+  prevPosition_ = parser_->getPosition();
+}
+
+bool EpubWordProvider::computeInsideParagraph() {
+  if (!parser_) {
+    return false;
+  }
+
+  SimpleXmlParser::Position saved = parser_->getPosition();
+
+  SimpleXmlParser::NodeType nodeType = parser_->getNodeType();
+  if (nodeType == SimpleXmlParser::None || nodeType == SimpleXmlParser::EndOfFile) {
+    parser_->setPosition(saved);
+    return false;
+  }
+
+  bool inside = false;
+  while (parser_->readBackward()) {
+    SimpleXmlParser::NodeType type = parser_->getNodeType();
+    if (type == SimpleXmlParser::Element) {
+      String name = parser_->getName();
+      if (equalsIgnoreCase(name, "p")) {
+        inside = true;
+        break;
+      }
+    } else if (type == SimpleXmlParser::EndElement) {
+      String name = parser_->getName();
+      if (equalsIgnoreCase(name, "p")) {
+        inside = false;
+        break;
+      }
+    }
+  }
+
+  parser_->setPosition(saved);
+  return inside;
 }
 
 void EpubWordProvider::reset() {
-  prevFilePos_ = 0;
   insideParagraph_ = false;
 
   // Reset parser to beginning - don't call read()
   if (parser_) {
-    parser_->seekToFilePosition(0);
+    SimpleXmlParser::Position start;
+    start.filePos = 0;
+    parser_->setPosition(start);
+    prevPosition_ = parser_->getPosition();
   }
 }

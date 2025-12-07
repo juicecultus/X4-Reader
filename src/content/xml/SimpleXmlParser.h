@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <SD.h>
 
+#include <utility>
 #include <vector>
 
 /**
@@ -39,6 +40,18 @@ class SimpleXmlParser {
     ProcessingInstruction,  // <?xml ... ?>
     CDATA,                  // <![CDATA[ ... ]]>
     EndOfFile
+  };
+
+  struct Position {
+    size_t filePos = 0;
+    NodeType nodeType = None;
+    String name;
+    String value;
+    bool isEmpty = false;
+    size_t textStart = 0;
+    size_t textEnd = 0;
+    size_t textCurrent = 0;
+    std::vector<std::pair<String, String>> attributes;
   };
 
   /**
@@ -122,7 +135,17 @@ class SimpleXmlParser {
    * Otherwise, scans to determine what element/node contains this position
    * Returns true if successful
    */
-  bool seekToFilePosition(size_t pos);
+  bool seekToFilePosition(size_t pos, bool preferTextBoundary = false);
+
+  /**
+   * Capture the current parser position including text state and attributes.
+   */
+  Position getPosition() const;
+
+  /**
+   * Restore a previously captured parser position.
+   */
+  bool setPosition(const Position& position);
 
   /**
    * Restore complete parser state (for ungetWord support)
@@ -150,7 +173,7 @@ class SimpleXmlParser {
    */
   size_t getFilePosition() const {
     // When in a text node, return the current position within the text
-    if (currentNodeType_ == Text && textNodeCurrentPos_ > 0) {
+    if (currentNodeType_ == Text) {
       return textNodeCurrentPos_;
     }
     return filePos_;

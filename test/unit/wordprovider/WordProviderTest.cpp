@@ -165,6 +165,16 @@ void testBidirectionalWordMatch(TestUtils::TestRunner& runner) {
       if (i > 0) {
         mismatchMsg += " (prev: '" + forwardWords[i - 1] + "')";
       }
+      size_t contextStart = (i > 3) ? (i - 3) : 0;
+      size_t contextEnd = std::min(compareCount, i + 4);
+      mismatchMsg += " | forward context:";
+      for (size_t j = contextStart; j < contextEnd; ++j) {
+        mismatchMsg += " " + forwardWords[j];
+      }
+      mismatchMsg += " | backward context:";
+      for (size_t j = contextStart; j < contextEnd; ++j) {
+        mismatchMsg += " " + backwardWords[j];
+      }
       allMatch = false;
       break;
     }

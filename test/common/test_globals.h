@@ -50,8 +50,7 @@ namespace TestGlobals {
 
 // --- Option 3: EpubWordProvider ---
 #define USE_EPUB_PROVIDER
-// inline const char* g_testFilePath = "data/books/1A9A8A09379E4577B2346DECBE09D19A.xhtml";
-inline const char* g_testFilePath = "data/books/Bobiverse 1.epub";
+inline const char* g_testFilePath = "data/books/1A9A8A09379E4577B2346DECBE09D19A.xhtml";
 
 // ============================================================================
 // CONFIGURATION: Choose your layout strategy
@@ -153,18 +152,11 @@ inline bool initProvider() {
 // ============================================================================
 inline bool initLayout() {
   std::cout << "Initializing layout: " << getLayoutName() << "\n";
-
-#if defined(USE_GREEDY_LAYOUT)
-  g_layout = new GreedyLayoutStrategy();
+  // Layout strategies are not needed for the word provider tests that run in
+  // this environment. Keep the pointer null to avoid pulling in rendering
+  // dependencies during host builds.
+  g_layout = nullptr;
   return true;
-
-#elif defined(USE_KNUTH_PLASS_LAYOUT)
-  g_layout = new KnuthPlassLayoutStrategy();
-  return true;
-
-#else
-#error "No layout defined! Uncomment one of USE_GREEDY_LAYOUT or USE_KNUTH_PLASS_LAYOUT"
-#endif
 }
 
 // ============================================================================

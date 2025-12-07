@@ -515,6 +515,7 @@ char SimpleXmlParser::readTextNodeCharForward() {
 
   // Move position forward
   textNodeCurrentPos_++;
+  filePos_ = textNodeCurrentPos_;
 
   return c;
 }
@@ -534,6 +535,7 @@ char SimpleXmlParser::readTextNodeCharBackward() {
 
   // Move to previous position
   textNodeCurrentPos_--;
+  filePos_ = textNodeCurrentPos_;
 
   // Read the character
   char c = getByteAt(textNodeCurrentPos_);
@@ -624,6 +626,17 @@ bool SimpleXmlParser::readBackward() {
       if (tagChar == '<') {
         break;
       }
+    }
+
+    // Skip declarations like <!DOCTYPE ...> which would otherwise return the next element twice
+    char tagLead = getByteAt(tagStart + 1);
+    if (tagLead == '!') {
+      filePos_ = tagStart;
+      if (tagStart == 0) {
+        currentNodeType_ = EndOfFile;
+        return false;
+      }
+      return readBackward();
     }
 
     // Now parse the tag starting at tagStart
@@ -772,7 +785,94 @@ char SimpleXmlParser::readPrevTextNodeChar() {
   return c;
 }
 
-bool SimpleXmlParser::seekToFilePosition(size_t pos) {
+SimpleXmlParser::Position SimpleXmlParser::getPosition() const {
+  Position pos;
+  pos.nodeType = currentNodeType_;
+  pos.name = currentName_;
+  pos.value = currentValue_;
+  pos.isEmpty = isEmptyElement_;
+  pos.textStart = textNodeStartPos_;
+  pos.textEnd = textNodeEndPos_;
+  pos.textCurrent = (currentNodeType_ == Text) ? textNodeCurrentPos_ : 0;
+  pos.filePos = (currentNodeType_ == Text) ? textNodeCurrentPos_ : filePos_;
+
+  for (const auto& attr : attributes_) {
+    pos.attributes.push_back({attr.name, attr.value});
+  }
+
+  return pos;
+}
+
+bool SimpleXmlParser::setPosition(const Position& position) {
+  if (!file_ || position.filePos > file_.size()) {
+    return false;
+  }
+
+  const bool preferText =
+      position.textCurrent > 0 || position.nodeType == Text || position.filePos == position.textCurrent;
+
+  // First, move to the requested file position. This determines whether we're inside a
+  // text node or between tags without relying on any cached node metadata.
+  if (!seekToFilePosition(position.filePos, preferText)) {
+    return false;
+  }
+
+  // When inside a text node, ensure the current pointer is restored. All other metadata can
+  // be reconstructed by reading from the file contents when needed.
+  if (currentNodeType_ == Text) {
+    if (position.textCurrent >= textNodeStartPos_ && position.textCurrent <= textNodeEndPos_) {
+      textNodeCurrentPos_ = position.textCurrent;
+      filePos_ = textNodeCurrentPos_;
+    }
+    hasPeekedTextNodeChar_ = false;
+    peekedTextNodeChar_ = '\0';
+    hasPeekedPrevTextNodeChar_ = false;
+    peekedPrevTextNodeChar_ = '\0';
+    loadBufferAround(filePos_);
+    return true;
+  }
+
+  // For non-text nodes, prefer parsing forward from the nearest tag boundary to rebuild
+  // the exact node at this position. This avoids ambiguity when the saved file position
+  // falls inside a tag rather than exactly at the '<'.
+  hasPeekedTextNodeChar_ = false;
+  peekedTextNodeChar_ = '\0';
+  hasPeekedPrevTextNodeChar_ = false;
+  peekedPrevTextNodeChar_ = '\0';
+
+  // If we're at the beginning of the file, just read forward.
+  if (position.filePos == 0) {
+    filePos_ = 0;
+    return read();
+  }
+
+  if (position.nodeType == Element || position.nodeType == EndElement || position.nodeType == Comment ||
+      position.nodeType == ProcessingInstruction || position.nodeType == CDATA) {
+    size_t tagStart = position.filePos;
+    while (tagStart > 0 && getByteAt(tagStart) != '<') {
+      tagStart--;
+    }
+    filePos_ = tagStart;
+    return read();
+  }
+
+  filePos_ = position.filePos;
+  if (!readBackward()) {
+    return false;
+  }
+
+  // If the restored position is before the requested offset, advance forward until we
+  // reach the node that covers or follows the target location.
+  while (getFilePosition() < position.filePos) {
+    if (!read()) {
+      break;
+    }
+  }
+
+  return true;
+}
+
+bool SimpleXmlParser::seekToFilePosition(size_t pos, bool preferTextBoundary) {
   if (!file_) {
     return false;
   }
@@ -876,17 +976,20 @@ bool SimpleXmlParser::seekToFilePosition(size_t pos) {
     // 2. The seek position is actually inside the text, not at the boundary
     if (hasNonWhitespace && pos < textEnd && pos >= textStart) {
       // Set up as a text node - this allows reading characters directly
-      currentNodeType_ = Text;
-      textNodeStartPos_ = textStart;
-      textNodeEndPos_ = textEnd;
-      textNodeCurrentPos_ = pos;
-      filePos_ = pos;
-      currentName_ = "";
-      isEmptyElement_ = false;
-      attributes_.clear();
-      hasPeekedTextNodeChar_ = false;
-      hasPeekedPrevTextNodeChar_ = false;
-      return true;
+      const bool atBoundary = pos == textStart;
+      if (!atBoundary || preferTextBoundary) {
+        currentNodeType_ = Text;
+        textNodeStartPos_ = textStart;
+        textNodeEndPos_ = textEnd;
+        textNodeCurrentPos_ = pos;
+        filePos_ = pos;
+        currentName_ = "";
+        isEmptyElement_ = false;
+        attributes_.clear();
+        hasPeekedTextNodeChar_ = false;
+        hasPeekedPrevTextNodeChar_ = false;
+        return true;
+      }
     }
   }
 
@@ -906,23 +1009,13 @@ bool SimpleXmlParser::seekToFilePosition(size_t pos) {
 }
 void SimpleXmlParser::restoreState(size_t pos, NodeType nodeType, size_t textStart, size_t textEnd,
                                    const String& elementName, bool isEmpty) {
-  if (!file_) {
-    return;
-  }
-
-  // Restore the node type and boundaries
-  currentNodeType_ = nodeType;
-  textNodeStartPos_ = textStart;
-  textNodeEndPos_ = textEnd;
-  textNodeCurrentPos_ = pos;
-  filePos_ = (nodeType == Text) ? textStart : pos;
-
-  // Restore element information
-  currentName_ = elementName;
-  isEmptyElement_ = isEmpty;
-
-  // Clear any peeked characters
-  hasPeekedTextNodeChar_ = false;
-  peekedTextNodeChar_ = '\0';
-  hasPeekedPrevTextNodeChar_ = false;
+  Position position;
+  position.filePos = (nodeType == Text) ? pos : pos;
+  position.nodeType = nodeType;
+  position.name = elementName;
+  position.isEmpty = isEmpty;
+  position.textStart = textStart;
+  position.textEnd = textEnd;
+  position.textCurrent = (nodeType == Text) ? pos : 0;
+  setPosition(position);
 }
