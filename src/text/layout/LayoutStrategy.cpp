@@ -40,13 +40,13 @@ LayoutStrategy::Line LayoutStrategy::getNextLine(WordProvider& provider, TextRen
     int wordStartIndex = provider.getCurrentIndex();
     String text = provider.getNextWord();
 
-    // Capture alignment after reading the first word (style is now pushed)
+    // Capture alignment when we see one in the paragraph
     // CSS alignment overrides the default
     if (!alignmentCaptured) {
-      alignmentCaptured = true;
       if (provider.hasStyleSupport()) {
         CssStyle style = provider.getCurrentStyle();
         if (style.hasTextAlign) {
+          alignmentCaptured = true;
           switch (style.textAlign) {
             case TextAlign::Center:
               result.alignment = ALIGN_CENTER;

@@ -281,7 +281,6 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
 
   // Reset style state for new chapter
   currentStyle_.reset();
-  styleStack_.clear();
 
   // Position parser at first node for reading
   parser_->read();
@@ -465,9 +464,6 @@ String EpubWordProvider::getNextWord() {
       // Check if this is a block element end tag
       String elementName = parser_->getName();
 
-      // Pop style when leaving any element (not just block elements)
-      popStyle();
-
       if (isBlockElement(elementName)) {
         // Move past this end element first
         parser_->read();
@@ -491,14 +487,12 @@ String EpubWordProvider::getNextWord() {
         continue;
       }
 
-      // Push style for this element (reads class attribute)
-      pushStyleForElement();
+      // Update style for this element (reads class attribute)
+      updateStyleForElement();
 
       if (isBlockElement(elementName)) {
         // Check if this is a self-closing element (like <br/>)
         if (parser_->isEmptyElement()) {
-          // Pop the style we just pushed since element is self-closing
-          popStyle();
           // Move past this element first
           parser_->read();
           // Skip ahead to find the next content (or reach end of file)
@@ -849,10 +843,9 @@ void EpubWordProvider::reset() {
   }
   // Reset style state
   currentStyle_.reset();
-  styleStack_.clear();
 }
 
-void EpubWordProvider::pushStyleForElement() {
+void EpubWordProvider::updateStyleForElement() {
   if (!cssParser_ || !parser_) {
     return;
   }
@@ -860,24 +853,11 @@ void EpubWordProvider::pushStyleForElement() {
   // Get class attribute from current element
   String classAttr = parser_->getAttribute("class");
   if (classAttr.isEmpty()) {
-    // No class attribute, push current style unchanged (for proper nesting)
-    styleStack_.push_back(currentStyle_);
+    // No class attribute, reset to default style
+    currentStyle_.reset();
     return;
   }
 
-  // Get combined style for all classes
-  CssStyle elementStyle = cssParser_->getCombinedStyle(classAttr);
-
-  // Push current style onto stack
-  styleStack_.push_back(currentStyle_);
-
-  // Merge element style into current style
-  currentStyle_.merge(elementStyle);
-}
-
-void EpubWordProvider::popStyle() {
-  if (!styleStack_.empty()) {
-    currentStyle_ = styleStack_.back();
-    styleStack_.pop_back();
-  }
+  // Get combined style for all classes and set as current
+  currentStyle_ = cssParser_->getCombinedStyle(classAttr);
 }

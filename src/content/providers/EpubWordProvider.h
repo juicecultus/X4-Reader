@@ -75,8 +75,7 @@ class EpubWordProvider : public WordProvider {
   void skipToNextContent();
 
   // Update the current style based on the element's class attribute
-  void pushStyleForElement();
-  void popStyle();
+  void updateStyleForElement();
 
   bool valid_ = false;
   bool isEpub_ = false;  // True if source is EPUB, false if direct XHTML
@@ -95,8 +94,7 @@ class EpubWordProvider : public WordProvider {
 
   // CSS style tracking
   const CssParser* cssParser_ = nullptr;  // Borrowed from EpubReader, not owned
-  CssStyle currentStyle_;                 // Currently active style
-  std::vector<CssStyle> styleStack_;      // Stack of styles for nested elements
+  CssStyle currentStyle_;                 // Currently active style (updated when entering elements)
 };
 
 #endif
