@@ -53,8 +53,33 @@ void testForwardReconstruction(TestUtils::TestRunner& runner) {
   TestGlobals::resetProvider();
   WordProvider& provider = TestGlobals::provider();
 
+  // Print the first few words to help debug too-many-empty-word issues
+  auto debugPrintFirstNWords = [](WordProvider& p, int maxLines) {
+    int originalPos = p.getCurrentIndex();
+    p.setPosition(0);
+    int printed = 0;
+    while (p.hasNextWord() && printed < maxLines) {
+      int posBefore = p.getCurrentIndex();
+      String w = p.getNextWord();
+      int posAfter = p.getCurrentIndex();
+      std::string s = w.c_str();
+      // Show a visible placeholder for empty strings instead of leaving blank lines
+      if (s.empty())
+        std::cout << "    [" << printed << "] <EMPTY> (posBefore=" << posBefore << ", posAfter=" << posAfter
+                  << ")\n";
+      else
+        std::cout << "    [" << printed << "] '" << s << "' (len=" << s.length() << ", posBefore=" << posBefore
+                  << ", posAfter=" << posAfter << ")\n";
+      printed++;
+    }
+    p.setPosition(originalPos);
+  };
+
   std::string rebuilt;
   int wordCount = 0;
+
+  // Debug: print first 20 words so we can spot empty / whitespace-only words quickly
+  debugPrintFirstNWords(provider, 20);
 
   while (provider.hasNextWord()) {
     String word = provider.getNextWord();

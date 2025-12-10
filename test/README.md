@@ -243,3 +243,28 @@ if ($LASTEXITCODE -ne 0) {
 - Display operations are stubbed out (no actual hardware needed)
 - Rendering tests save PBM files for visual verification
 - Tests are single-threaded and deterministic
+
+## Using CMake and test/scripts (recommended)
+
+This repository includes a CMake-based test build in `test/CMakeLists.txt` and helper scripts in `test/scripts` to build and run tests.
+
+macOS / Linux:
+
+```bash
+# From the repository root - builds into `test/build`
+test/scripts/build_tests.sh
+
+# Run all tests
+test/scripts/run_tests.sh
+```
+
+Windows (PowerShell):
+
+```powershell
+# From the repository root
+test\scripts\build_tests.ps1
+test\scripts\run_tests.ps1
+```
+
+VS Code tasks and launch configs are provided to run and debug tests. Use the `Build Tests (Unix)` or `Build Tests (Windows)` task to compile, then use `Debug Test (LLDB)` or `Debug Test (GDB)` in the Run & Debug pane to choose a test to debug.
+

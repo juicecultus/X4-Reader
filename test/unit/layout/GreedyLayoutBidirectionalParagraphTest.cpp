@@ -18,19 +18,19 @@
 #include "test_globals.h"
 #include "test_utils.h"
 
-static std::string joinLine(const std::vector<LayoutStrategy::Word>& line) {
+static std::string joinLine(const LayoutStrategy::Line& line) {
   std::string out;
-  for (size_t i = 0; i < line.size(); ++i) {
-    out += line[i].text.c_str();
-    if (i + 1 < line.size())
+  for (size_t i = 0; i < line.words.size(); ++i) {
+    out += line.words[i].text.c_str();
+    if (i + 1 < line.words.size())
       out += ' ';
   }
   return out;
 }
 
-static std::string getFirstWord(const std::vector<LayoutStrategy::Word>& line) {
+static std::string getFirstWord(const LayoutStrategy::Line& line) {
   // Skip leading whitespace/empty words
-  for (const auto& word : line) {
+  for (const auto& word : line.words) {
     std::string w = word.text.c_str();
     // Skip if empty or just whitespace
     if (!w.empty() && w.find_first_not_of(" \t\n\r") != std::string::npos) {
@@ -40,9 +40,9 @@ static std::string getFirstWord(const std::vector<LayoutStrategy::Word>& line) {
   return "";
 }
 
-static std::string getLastWord(const std::vector<LayoutStrategy::Word>& line) {
+static std::string getLastWord(const LayoutStrategy::Line& line) {
   // Skip trailing whitespace/empty words
-  for (auto it = line.rbegin(); it != line.rend(); ++it) {
+  for (auto it = line.words.rbegin(); it != line.words.rend(); ++it) {
     std::string w = it->text.c_str();
     // Skip if empty or just whitespace
     if (!w.empty() && w.find_first_not_of(" \t\n\r") != std::string::npos) {
@@ -150,7 +150,7 @@ void runBidirectionalParagraphTest(TestUtils::TestRunner& runner, EInkDisplay& d
       int endPos = provider.getCurrentIndex();
 
       // Skip empty lines at end of content (not intentional empty lines)
-      if (line.empty() && !isParagraphEnd) {
+      if (line.words.empty() && !isParagraphEnd) {
         break;
       }
 

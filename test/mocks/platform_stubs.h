@@ -68,8 +68,21 @@ inline void delay(unsigned long) {}
 #define LOW 0
 #endif
 
-// Minimal Serial mock declaration
-struct MockSerial {
+// Minimal Print class and Serial mock declaration
+class Print {
+ public:
+  virtual size_t write(const uint8_t* buf, size_t size) {
+    (void)buf;
+    return size;
+  }
+  virtual size_t write(uint8_t c) {
+    (void)c;
+    return 1;
+  }
+  virtual ~Print() = default;
+};
+
+struct MockSerial : public Print {
   void printf(const char*, ...);
   void println(const char*);
   void println(int v);
@@ -79,8 +92,9 @@ struct MockSerial {
   void print(const char*);
   void print(int v);
   void print(const String& s);
-  void write(uint8_t c) {
+  size_t write(uint8_t c) {
     putchar(c);
+    return 1;
   }
 };
 

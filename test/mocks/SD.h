@@ -1,6 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include "platform_stubs.h"
+#include "WString.h"
+using std::min;
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -70,6 +73,12 @@ struct MockFile {
     currentPos = content.size();
     return len;
   }
+  size_t print(const String& str) {
+    return print(str.c_str());
+  }
+  bool isDirectory() const { return false; }
+  MockFile openNextFile() const { return MockFile(); }
+  const char* name() const { return filepath.c_str(); }
   bool available() {
     return isOpen && currentPos < content.size();
   }
@@ -91,6 +100,9 @@ struct MockFile {
 };
 
 struct MockSD {
+  bool begin(int cs, MockSPI& spi, unsigned long freq) {
+    (void)cs; (void)spi; (void)freq; return true;
+  }
   MockFile open(const char* path, int mode = FILE_READ) {
     MockFile f;
     f.filepath = path;
@@ -124,6 +136,9 @@ struct MockSD {
 #else
     return ::mkdir(path, 0755) == 0 || errno == EEXIST;
 #endif
+  }
+  bool remove(const char* path) {
+    return std::remove(path) == 0;
   }
 };
 
