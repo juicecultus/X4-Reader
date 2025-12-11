@@ -13,63 +13,80 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
-    /* Error codes */
-    typedef enum
-    {
-        EPUB_OK = 0,
-        EPUB_ERROR_FILE_NOT_FOUND = -1,
-        EPUB_ERROR_NOT_AN_EPUB = -2,
-        EPUB_ERROR_CORRUPTED = -3,
-        EPUB_ERROR_OUT_OF_MEMORY = -4,
-        EPUB_ERROR_INVALID_PARAM = -5,
-        EPUB_ERROR_EXTRACTION_FAILED = -6,
-        EPUB_ERROR_FILE_NOT_IN_ARCHIVE = -7
-    } epub_error;
+/* Error codes */
+typedef enum {
+  EPUB_OK = 0,
+  EPUB_ERROR_FILE_NOT_FOUND = -1,
+  EPUB_ERROR_NOT_AN_EPUB = -2,
+  EPUB_ERROR_CORRUPTED = -3,
+  EPUB_ERROR_OUT_OF_MEMORY = -4,
+  EPUB_ERROR_INVALID_PARAM = -5,
+  EPUB_ERROR_EXTRACTION_FAILED = -6,
+  EPUB_ERROR_FILE_NOT_IN_ARCHIVE = -7
+} epub_error;
 
-    /* EPUB reader context - opaque structure */
-    typedef struct epub_reader epub_reader;
+/* EPUB reader context - opaque structure */
+typedef struct epub_reader epub_reader;
 
-    /* Callback function for streaming file content */
-    typedef int (*epub_data_callback)(const void *data, size_t size, void *user_data);
+/* Callback function for streaming file content */
+typedef int (*epub_data_callback)(const void* data, size_t size, void* user_data);
 
-    /* File information structure */
-    typedef struct
-    {
-        char filename[256];
-        uint64_t compressed_size;
-        uint64_t uncompressed_size;
-        uint32_t file_offset; /* Offset in ZIP file */
-        uint32_t compression; /* 0=stored, 8=deflate */
-    } epub_file_info;
+/* File information structure */
+typedef struct {
+  char filename[256];
+  uint64_t compressed_size;
+  uint64_t uncompressed_size;
+  uint32_t file_offset; /* Offset in ZIP file */
+  uint32_t compression; /* 0=stored, 8=deflate */
+} epub_file_info;
 
-    /* -------------------- Core API -------------------- */
+/* -------------------- Core API -------------------- */
 
-    /* Open an EPUB file for minimal reading */
-    epub_error epub_open(const char *filepath, epub_reader **out_reader);
+/* Open an EPUB file for minimal reading */
+epub_error epub_open(const char* filepath, epub_reader** out_reader);
 
-    /* Close and free reader */
-    void epub_close(epub_reader *reader);
+/* Close and free reader */
+void epub_close(epub_reader* reader);
 
-    /* Get total number of files */
-    uint32_t epub_get_file_count(epub_reader *reader);
+/* Get total number of files */
+uint32_t epub_get_file_count(epub_reader* reader);
 
-    /* Get file info by index */
-    epub_error epub_get_file_info(epub_reader *reader, uint32_t index, epub_file_info *info);
+/* Get file info by index */
+epub_error epub_get_file_info(epub_reader* reader, uint32_t index, epub_file_info* info);
 
-    /* Find file by name */
-    epub_error epub_locate_file(epub_reader *reader, const char *filename, uint32_t *out_index);
+/* Find file by name */
+epub_error epub_locate_file(epub_reader* reader, const char* filename, uint32_t* out_index);
 
-    /* Extract file with streaming (minimal memory) */
-    epub_error epub_extract_streaming(epub_reader *reader, uint32_t file_index,
-                                      epub_data_callback callback, void *user_data,
-                                      size_t chunk_size);
+/* Extract file with streaming (minimal memory) */
+epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub_data_callback callback,
+                                  void* user_data, size_t chunk_size);
 
-    /* Get error string */
-    const char *epub_get_error_string(epub_error error);
+/* -------------------- Pull-based Streaming API -------------------- */
+
+/* Opaque streaming context for pull-based extraction */
+typedef struct epub_stream_context epub_stream_context;
+
+/* Start streaming extraction of a file (pull-based)
+ * Returns streaming context or NULL on error
+ * chunk_size: size of internal buffer (0 for default 8KB)
+ */
+epub_stream_context* epub_start_streaming(epub_reader* reader, uint32_t file_index, size_t chunk_size);
+
+/* Read next chunk of decompressed data (pull-based)
+ * Returns number of bytes read, 0 for EOF, -1 for error
+ * buffer: destination buffer
+ * max_size: maximum bytes to read
+ */
+int epub_read_chunk(epub_stream_context* ctx, void* buffer, size_t max_size);
+
+/* End streaming and free context */
+void epub_end_streaming(epub_stream_context* ctx);
+
+/* Get error string */
+const char* epub_get_error_string(epub_error error);
 
 #ifdef __cplusplus
 }

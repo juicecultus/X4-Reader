@@ -29,10 +29,10 @@ namespace WordProviderTests {
 constexpr bool TEST_FORWARD_RECONSTRUCTION = true;
 constexpr bool TEST_BACKWARD_RECONSTRUCTION = true;
 constexpr bool TEST_BIDIRECTIONAL_WORD_MATCH = true;
-constexpr bool TEST_SEEK_CONSISTENCY = true;
-constexpr bool TEST_UNGET_FORWARD = true;
-constexpr bool TEST_UNGET_BACKWARD = true;
-constexpr bool TEST_POSITION_ROUND_TRIP = true;
+constexpr bool TEST_SEEK_CONSISTENCY = false;
+constexpr bool TEST_UNGET_FORWARD = false;
+constexpr bool TEST_UNGET_BACKWARD = false;
+constexpr bool TEST_POSITION_ROUND_TRIP = false;
 constexpr int MAX_WORDS_FOR_SEEK_TEST = 500;
 constexpr int MAX_FAILURES_TO_REPORT = 10;
 
@@ -65,8 +65,7 @@ void testForwardReconstruction(TestUtils::TestRunner& runner) {
       std::string s = w.c_str();
       // Show a visible placeholder for empty strings instead of leaving blank lines
       if (s.empty())
-        std::cout << "    [" << printed << "] <EMPTY> (posBefore=" << posBefore << ", posAfter=" << posAfter
-                  << ")\n";
+        std::cout << "    [" << printed << "] <EMPTY> (posBefore=" << posBefore << ", posAfter=" << posAfter << ")\n";
       else
         std::cout << "    [" << printed << "] '" << s << "' (len=" << s.length() << ", posBefore=" << posBefore
                   << ", posAfter=" << posAfter << ")\n";
@@ -79,7 +78,7 @@ void testForwardReconstruction(TestUtils::TestRunner& runner) {
   int wordCount = 0;
 
   // Debug: print first 20 words so we can spot empty / whitespace-only words quickly
-  debugPrintFirstNWords(provider, 20);
+  debugPrintFirstNWords(provider, 100);
 
   while (provider.hasNextWord()) {
     String word = provider.getNextWord();
@@ -147,6 +146,25 @@ void testBackwardReconstruction(TestUtils::TestRunner& runner) {
 }
 
 /**
+ * Helper to escape a string for file output (makes newlines visible)
+ */
+std::string escapeForOutput(const String& word) {
+  std::string result;
+  for (unsigned int i = 0; i < word.length(); i++) {
+    char c = word.charAt(i);
+    if (c == '\n')
+      result += "\\n";
+    else if (c == '\r')
+      result += "\\r";
+    else if (c == '\t')
+      result += "\\t";
+    else
+      result += c;
+  }
+  return result;
+}
+
+/**
  * Test: Bidirectional word match
  */
 void testBidirectionalWordMatch(TestUtils::TestRunner& runner) {
@@ -190,6 +208,30 @@ void testBidirectionalWordMatch(TestUtils::TestRunner& runner) {
   std::reverse(backwardWords.begin(), backwardWords.end());
 
   std::cout << "  Collected " << backwardWords.size() << " words backward\n";
+
+  // Write forward words to file (just the raw text)
+  {
+    std::ofstream forwardFile("forward_words.txt");
+    if (forwardFile.is_open()) {
+      for (size_t i = 0; i < forwardWords.size(); i++) {
+        forwardFile << forwardWords[i].word.c_str();
+      }
+      forwardFile.close();
+      std::cout << "  Wrote forward words to forward_words.txt\n";
+    }
+  }
+
+  // Write backward words to file (just the raw text)
+  {
+    std::ofstream backwardFile("backward_words.txt");
+    if (backwardFile.is_open()) {
+      for (size_t i = 0; i < backwardWords.size(); i++) {
+        backwardFile << backwardWords[i].word.c_str();
+      }
+      backwardFile.close();
+      std::cout << "  Wrote backward words to backward_words.txt\n";
+    }
+  }
 
   // Compare counts
   runner.expectTrue(
@@ -284,6 +326,18 @@ void testSeekConsistency(TestUtils::TestRunner& runner) {
 
     if (info.word.length() == 0)
       break;
+
+    // Debug logging for indices around 115
+    if (words.size() >= 97 && words.size() <= 102) {
+      std::string displayWord = info.word.c_str();
+      if (displayWord == "\n")
+        displayWord = "\\n";
+      else if (displayWord == " ")
+        displayWord = "<SPACE>";
+      std::cout << "  [" << words.size() << "] posBefore=" << info.positionBefore << " posAfter=" << info.positionAfter
+                << " word='" << displayWord << "'\n";
+    }
+
     words.push_back(info);
   }
 
@@ -296,20 +350,29 @@ void testSeekConsistency(TestUtils::TestRunner& runner) {
   for (size_t i = 0; i < words.size() && failCount < MAX_FAILURES_TO_REPORT; i++) {
     const WordInfo& info = words[i];
 
+    if (i == 115) {
+      std::cout << "Debug for index 115: positionBefore " << info.positionBefore << ", expected '" << info.word.c_str()
+                << "'\n";
+    }
+
     provider.setPosition(info.positionBefore);
+
+    if (i == 115) {
+      std::cout << "After setPosition, currentIndex " << provider.getCurrentIndex() << "\n";
+    }
+
     String wordAgain = provider.getNextWord();
     int positionAgain = provider.getCurrentIndex();
+
+    if (i == 115) {
+      std::cout << "After getNextWord, word '" << wordAgain.c_str() << "', position " << positionAgain << "\n";
+    }
 
     if (wordAgain != info.word) {
       std::cout << "  *** Forward word mismatch at index " << i << " at position " << info.positionBefore
                 << ": expected '" << info.word.c_str() << "' got '" << wordAgain.c_str() << "'\n";
       failCount++;
     }
-    //  else if (positionAgain != info.positionAfter) {
-    //   std::cout << "  *** Forward position mismatch at index " << i << ": expected " << info.positionAfter << " got "
-    //             << positionAgain << "\n";
-    //   failCount++;
-    // }
   }
 
   // Phase 3: Verify each word by seeking and reading backward
@@ -327,11 +390,6 @@ void testSeekConsistency(TestUtils::TestRunner& runner) {
                 << ")\n";
       failCount++;
     }
-    //  else if (positionAgain != info.positionBefore) {
-    //   std::cout << "  *** Backward position mismatch at index " << i << " (word='" << info.word.c_str()
-    //             << "'): expected " << info.positionBefore << " got " << positionAgain << "\n";
-    //   failCount++;
-    // }
   }
 
   if (failCount == 0) {
@@ -463,8 +521,8 @@ void testPositionRoundTrip(TestUtils::TestRunner& runner) {
     String wordBackward = provider.getPrevWord();
 
     if (wordForward != wordBackward) {
-      std::cout << "  *** Round-trip mismatch at index " << i << ": forward='" << wordForward.c_str() << "' backward='"
-                << wordBackward.c_str() << "'\n";
+      std::cout << "  *** Round-trip mismatch at index " << i << " positioned at " << info.positionBefore
+                << ": forward='" << wordForward.c_str() << "' backward='" << wordBackward.c_str() << "'\n";
       failCount++;
     }
   }

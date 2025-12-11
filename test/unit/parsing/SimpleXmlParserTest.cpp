@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "content/epub/EpubReader.h"
+#include "content/epub/epub_parser.h"
 #include "content/xml/SimpleXmlParser.h"
 #include "test_globals.h"
 #include "test_utils.h"
@@ -20,14 +22,6 @@ String readTextForward(SimpleXmlParser& parser) {
   String text = "";
   while (parser.hasMoreTextChars()) {
     text += parser.readTextNodeCharForward();
-  }
-  return text;
-}
-
-String readTextBackward(SimpleXmlParser& parser) {
-  String text = "";
-  while (parser.hasMoreTextCharsBackward()) {
-    text = String(parser.readPrevTextNodeChar()) + text;
   }
   return text;
 }
@@ -55,14 +49,24 @@ std::vector<NodeSnapshot> readForwardNodes(TestUtils::TestRunner& runner, const 
   return result;
 }
 
-std::vector<NodeSnapshot> readBackwardNodes(TestUtils::TestRunner& runner, const char* path) {
+std::vector<NodeSnapshot> readForwardNodesFromMemory(TestUtils::TestRunner& runner, const char* data, size_t dataSize) {
   SimpleXmlParser parser;
   std::vector<NodeSnapshot> result;
 
-  runner.expectTrue(parser.open(path), "Open XHTML for backward pass", "", true);
-  parser.seekToFilePosition(parser.getFileSize());
+  std::cout << "  Testing openFromMemory with " << dataSize << " bytes\n";
 
-  while (parser.readBackward()) {
+  bool opened = parser.openFromMemory(data, dataSize);
+  std::cout << "  openFromMemory returned: " << (opened ? "true" : "false") << "\n";
+
+  if (!opened) {
+    std::cout << "  ERROR: Failed to open from memory!\n";
+    return result;
+  }
+
+  std::cout << "  Starting to read nodes...\n";
+  int nodeCount = 0;
+  while (parser.read()) {
+    nodeCount++;
     NodeSnapshot snap;
     snap.type = parser.getNodeType();
     snap.name = parser.getName();
@@ -71,152 +75,328 @@ std::vector<NodeSnapshot> readBackwardNodes(TestUtils::TestRunner& runner, const
     snap.filePosEnd = parser.getElementEndPos();
 
     if (snap.type == SimpleXmlParser::Text) {
-      snap.text = readTextBackward(parser);
-    }
-
-    // Skip duplicates (shouldn't happen but being safe)
-    if (!result.empty()) {
-      const auto& last = result.back();
-      if (last.type == snap.type && last.name == snap.name && last.isEmpty == snap.isEmpty &&
-          last.filePosStart == snap.filePosStart && last.filePosEnd == snap.filePosEnd) {
-        continue;
-      }
+      snap.text = readTextForward(parser);
     }
 
     result.push_back(snap);
+
+    // Show first few nodes for debugging
+    if (nodeCount <= 10) {
+      std::cout << "    Node " << nodeCount << ": ";
+      if (snap.type == SimpleXmlParser::Element) {
+        std::cout << "Element <" << snap.name.c_str() << ">";
+      } else if (snap.type == SimpleXmlParser::EndElement) {
+        std::cout << "EndElement </" << snap.name.c_str() << ">";
+      } else if (snap.type == SimpleXmlParser::Text) {
+        std::cout << "Text: \"" << snap.text.substring(0, 30).c_str() << (snap.text.length() > 30 ? "..." : "") << "\"";
+      }
+      std::cout << "\n";
+    }
   }
+
+  std::cout << "  Total nodes read: " << nodeCount << "\n";
   parser.close();
   return result;
 }
 
-void testForwardBackwardSymmetry(TestUtils::TestRunner& runner, const char* path) {
-  auto forward = readForwardNodes(runner, path);
-  auto backward = readBackwardNodes(runner, path);
+// Wrapper for EPUB stream callback with byte tracking
+struct StreamCallbackContext {
+  epub_stream_context* epubStream;
+  size_t totalBytesRead;
+  int callCount;
+};
 
-  runner.expectTrue(!forward.empty(), "Forward pass captured nodes", "", true);
-  runner.expectTrue(!backward.empty(), "Backward pass captured nodes", "", true);
-
-  std::reverse(backward.begin(), backward.end());
-
-  runner.expectTrue(forward.size() == backward.size(), "Node counts match", "", true);
-  std::cout << "Forward nodes: " << forward.size() << ", backward nodes: " << backward.size() << "\n";
-
-  int positionMismatches = 0;
-  const int MAX_POSITION_REPORTS = 10;
-
-  for (size_t i = 0; i < forward.size() && i < backward.size(); i++) {
-    const auto& f = forward[i];
-    const auto& b = backward[i];
-
-    if (f.type != b.type || f.name != b.name || f.isEmpty != b.isEmpty) {
-      std::cout << "Mismatch at node " << i << ": forward type=" << f.type << " name=" << f.name.c_str()
-                << " empty=" << f.isEmpty << ", backward type=" << b.type << " name=" << b.name.c_str()
-                << " empty=" << b.isEmpty << "\n";
-    }
-
-    runner.expectTrue(f.type == b.type, "Node " + std::to_string(i) + " type matches", "", true);
-    runner.expectTrue(f.name == b.name, "Node " + std::to_string(i) + " name matches", "", true);
-    runner.expectTrue(f.isEmpty == b.isEmpty, "Node " + std::to_string(i) + " isEmpty matches", "", true);
-
-    if (f.type == SimpleXmlParser::Text) {
-      runner.expectTrue(f.text == b.text, "Node " + std::to_string(i) + " text matches", "", true);
-    }
-
-    // Check position consistency
-    if (f.filePosStart != b.filePosStart) {
-      if (positionMismatches < MAX_POSITION_REPORTS) {
-        std::cout << "*** Position START mismatch at node " << i << " (type=" << f.type << " name=" << f.name.c_str()
-                  << "): forward=" << f.filePosStart << " backward=" << b.filePosStart << "\n";
-      }
-      positionMismatches++;
-    }
-    if (f.filePosEnd != b.filePosEnd) {
-      if (positionMismatches < MAX_POSITION_REPORTS) {
-        std::cout << "*** Position END mismatch at node " << i << " (type=" << f.type << " name=" << f.name.c_str()
-                  << "): forward=" << f.filePosEnd << " backward=" << b.filePosEnd << "\n";
-      }
-      positionMismatches++;
-    }
+// EPUB stream callback for testing
+int epubStreamCallback(char* buffer, size_t maxSize, void* userData) {
+  StreamCallbackContext* ctx = (StreamCallbackContext*)userData;
+  int bytesRead = epub_read_chunk(ctx->epubStream, (uint8_t*)buffer, maxSize);
+  ctx->callCount++;
+  std::cout << "    [Stream callback #" << ctx->callCount << "] maxSize=" << maxSize << " bytesRead=" << bytesRead
+            << " total=" << (ctx->totalBytesRead + (bytesRead > 0 ? bytesRead : 0)) << "\n";
+  if (bytesRead > 0) {
+    ctx->totalBytesRead += bytesRead;
   }
-
-  if (positionMismatches > 0) {
-    std::cout << "Total position mismatches: " << positionMismatches << " out of " << forward.size() << " nodes\n";
-  }
-
-  runner.expectTrue(positionMismatches == 0, "All node positions match between forward and backward reading");
+  return bytesRead;
 }
 
-void testMidTextNavigation(TestUtils::TestRunner& runner, const char* path) {
+std::vector<NodeSnapshot> readForwardNodesFromStream(TestUtils::TestRunner& runner, const char* epubPath,
+                                                     int spineIndex) {
   SimpleXmlParser parser;
-  runner.expectTrue(parser.open(path), "Open XHTML for mid-text test", "", true);
+  std::vector<NodeSnapshot> result;
 
-  int textNodesTested = 0;
-  while (parser.read()) {
-    if (parser.getNodeType() != SimpleXmlParser::Text)
-      continue;
+  std::cout << "  Testing openFromStream from EPUB spine item " << spineIndex << "\n";
 
-    size_t startPos = parser.getFilePosition();
-    String fullText = readTextForward(parser);
-    if (fullText.length() < 2)
-      continue;
-
-    // Calculate a mid-point offset (in characters)
-    size_t offset = fullText.length() / 2;
-
-    // Reset to start and read partway to get the file position at the midpoint
-    parser.seekToFilePosition(startPos);
-    runner.expectTrue(parser.getNodeType() == SimpleXmlParser::Text, "Text node restored after seek to start", "",
-                      true);
-
-    for (size_t i = 0; i < offset && parser.hasMoreTextChars(); i++) {
-      parser.readTextNodeCharForward();
-    }
-
-    // Save the file position at the midpoint
-    size_t midPos = parser.getFilePosition();
-
-    // Now seek to midPos - this should restore us to the exact same state
-    parser.seekToFilePosition(midPos);
-    runner.expectTrue(parser.getNodeType() == SimpleXmlParser::Text, "Text node restored after seek to mid", "", true);
-    String forwardPart = readTextForward(parser);
-
-    // Seek to midPos again and read backward to get the first half
-    parser.seekToFilePosition(midPos);
-    runner.expectTrue(parser.getNodeType() == SimpleXmlParser::Text, "Text node restored after second seek to mid", "",
-                      true);
-    String backwardPart = readTextBackward(parser);
-
-    // Combine backward + forward should equal the full text
-    String combined = backwardPart + forwardPart;
-    runner.expectTrue(combined == fullText,
-                      "Combined text matches full text for node " + std::to_string(textNodesTested), "", true);
-
-    if (combined != fullText) {
-      std::cout << "Full text length: " << fullText.length() << ", combined length: " << combined.length() << "\n";
-      std::cout << "Backward part length: " << backwardPart.length()
-                << ", forward part length: " << forwardPart.length() << "\n";
-      std::cout << "Full text: \"" << fullText.c_str() << "\"\n";
-      std::cout << "Backward part: \"" << backwardPart.c_str() << "\"\n";
-      std::cout << "Forward part: \"" << forwardPart.c_str() << "\"\n";
-      std::cout << "Combined: \"" << combined.c_str() << "\"\n";
-    }
-
-    textNodesTested++;
+  // Open EPUB reader (takes path in constructor, not via open())
+  EpubReader reader(epubPath);
+  if (!reader.isValid()) {
+    std::cout << "  ERROR: Failed to open EPUB\n";
+    return result;
   }
 
-  runner.expectTrue(textNodesTested > 0, "At least one text node was tested", "", true);
-  std::cout << "Tested " << textNodesTested << " text nodes for mid-text navigation\n";
+  // Get spine item (SpineItem is a global struct, not EpubReader::SpineItem)
+  const SpineItem* spineItem = reader.getSpineItem(spineIndex);
+  if (!spineItem) {
+    std::cout << "  ERROR: Invalid spine index\n";
+    return result;
+  }
 
+  // Build full path: content.opf is at OEBPS/content.opf, so hrefs are relative to OEBPS/
+  String contentOpfPath = reader.getContentOpfPath();
+  String baseDir = "";
+  int lastSlash = contentOpfPath.lastIndexOf('/');
+  if (lastSlash >= 0) {
+    baseDir = contentOpfPath.substring(0, lastSlash + 1);
+  }
+  String fullHref = baseDir + spineItem->href;
+
+  std::cout << "  Streaming from: " << fullHref.c_str() << "\n";
+
+  // Get file info before streaming to check uncompressed size
+  uint32_t fileIndex;
+  epub_error err = epub_locate_file(reader.getReader(), fullHref.c_str(), &fileIndex);
+  if (err == EPUB_OK) {
+    epub_file_info info;
+    epub_get_file_info(reader.getReader(), fileIndex, &info);
+    std::cout << "  EPUB file index: " << fileIndex << "\n";
+    std::cout << "  Compressed size: " << info.compressed_size << "\n";
+    std::cout << "  Uncompressed size: " << info.uncompressed_size << "\n";
+    std::cout << "  Compression: " << info.compression << "\n";
+  } else {
+    std::cout << "  ERROR: Could not locate file in EPUB\n";
+  }
+
+  // Start streaming from spine item using full path
+  epub_stream_context* epubStreamCtx = reader.startStreaming(fullHref.c_str(), 8192);
+  if (!epubStreamCtx) {
+    std::cout << "  ERROR: Failed to start EPUB streaming\n";
+    return result;
+  }
+
+  // Create callback context for byte tracking
+  StreamCallbackContext callbackCtx;
+  callbackCtx.epubStream = epubStreamCtx;
+  callbackCtx.totalBytesRead = 0;
+  callbackCtx.callCount = 0;
+
+  bool opened = parser.openFromStream(epubStreamCallback, &callbackCtx);
+  std::cout << "  openFromStream returned: " << (opened ? "true" : "false") << "\n";
+
+  if (!opened) {
+    std::cout << "  ERROR: Failed to open from stream!\n";
+    return result;
+  }
+
+  std::cout << "  Starting to read nodes...\n";
+  int nodeCount = 0;
+  while (parser.read()) {
+    nodeCount++;
+    NodeSnapshot snap;
+    snap.type = parser.getNodeType();
+    snap.name = parser.getName();
+    snap.isEmpty = parser.isEmptyElement();
+    snap.filePosStart = parser.getElementStartPos();
+    snap.filePosEnd = parser.getElementEndPos();
+
+    if (snap.type == SimpleXmlParser::Text) {
+      snap.text = readTextForward(parser);
+    }
+
+    result.push_back(snap);
+
+    // Show first few nodes for debugging
+    if (nodeCount <= 10) {
+      std::cout << "    Node " << nodeCount << ": ";
+      if (snap.type == SimpleXmlParser::Element) {
+        std::cout << "Element <" << snap.name.c_str() << ">";
+      } else if (snap.type == SimpleXmlParser::EndElement) {
+        std::cout << "EndElement </" << snap.name.c_str() << ">";
+      } else if (snap.type == SimpleXmlParser::Text) {
+        std::cout << "Text: \"" << snap.text.substring(0, 30).c_str() << (snap.text.length() > 30 ? "..." : "") << "\"";
+      }
+      std::cout << "\n";
+    }
+  }
+
+  std::cout << "  Total nodes read: " << nodeCount << "\n";
+  std::cout << "  Total bytes streamed: " << callbackCtx.totalBytesRead << " in " << callbackCtx.callCount
+            << " calls\n";
   parser.close();
+
+  // Clean up EPUB streaming
+  epub_end_streaming(epubStreamCtx);
+
+  return result;
+}
+
+void testEpubStreamingParsing(TestUtils::TestRunner& runner, const char* epubPath, int spineIndex) {
+  std::cout << "\n=== Testing EPUB Streaming vs File vs Memory Parsing ===\n";
+  std::cout << "EPUB: " << epubPath << ", spine index: " << spineIndex << "\n";
+
+  // Step 1: Open EPUB and extract the spine item to a file
+  EpubReader reader(epubPath);
+  if (!reader.isValid()) {
+    std::cout << "ERROR: Failed to open EPUB\n";
+    runner.expectTrue(false, "Should be able to open EPUB");
+    return;
+  }
+
+  const SpineItem* spineItem = reader.getSpineItem(spineIndex);
+  if (!spineItem) {
+    std::cout << "ERROR: Invalid spine index " << spineIndex << "\n";
+    runner.expectTrue(false, "Should have valid spine item");
+    return;
+  }
+
+  // Build full path relative to content.opf
+  String contentOpfPath = reader.getContentOpfPath();
+  String baseDir = "";
+  int lastSlash = contentOpfPath.lastIndexOf('/');
+  if (lastSlash >= 0) {
+    baseDir = contentOpfPath.substring(0, lastSlash + 1);
+  }
+  String fullHref = baseDir + spineItem->href;
+
+  std::cout << "Spine item href: " << spineItem->href.c_str() << "\n";
+  std::cout << "Full path in EPUB: " << fullHref.c_str() << "\n";
+
+  // Extract the file to disk
+  String extractedPath = reader.getFile(fullHref.c_str());
+  if (extractedPath.isEmpty()) {
+    std::cout << "ERROR: Failed to extract XHTML from EPUB\n";
+    runner.expectTrue(false, "Should be able to extract XHTML from EPUB");
+    return;
+  }
+  std::cout << "Extracted to: " << extractedPath.c_str() << "\n";
+
+  // Step 2: Load extracted file into memory
+  File file = SD.open(extractedPath.c_str(), FILE_READ);
+  if (!file) {
+    std::cout << "ERROR: Cannot open extracted file for reading\n";
+    runner.expectTrue(false, "Should be able to open extracted file");
+    return;
+  }
+
+  size_t fileSize = file.size();
+  std::cout << "Extracted file size: " << fileSize << " bytes\n";
+
+  if (fileSize == 0) {
+    std::cout << "ERROR: Extracted file is empty\n";
+    file.close();
+    runner.expectTrue(false, "Extracted file should not be empty");
+    return;
+  }
+
+  char* buffer = new char[fileSize + 1];
+  size_t bytesRead = file.read((uint8_t*)buffer, fileSize);
+  buffer[bytesRead] = '\0';
+  file.close();
+
+  std::cout << "Bytes read into memory: " << bytesRead << "\n";
+  std::cout << "First 200 bytes:\n---\n";
+  for (size_t i = 0; i < 200 && i < bytesRead; i++) {
+    std::cout << buffer[i];
+  }
+  std::cout << "\n---\n";
+
+  // Step 3: Parse from extracted file
+  std::cout << "\n--- Parsing from FILE (extracted) ---\n";
+  auto fileNodes = readForwardNodes(runner, extractedPath.c_str());
+  std::cout << "File parsing result: " << fileNodes.size() << " nodes\n";
+
+  // Step 4: Parse from memory
+  std::cout << "\n--- Parsing from MEMORY ---\n";
+  auto memoryNodes = readForwardNodesFromMemory(runner, buffer, bytesRead);
+  std::cout << "Memory parsing result: " << memoryNodes.size() << " nodes\n";
+
+  // Step 5: Parse from EPUB stream (same content, streamed directly)
+  std::cout << "\n--- Parsing from EPUB STREAM ---\n";
+  auto streamNodes = readForwardNodesFromStream(runner, epubPath, spineIndex);
+  std::cout << "Stream parsing result: " << streamNodes.size() << " nodes\n";
+
+  // Cleanup
+  delete[] buffer;
+
+  // Compare results
+  std::cout << "\n=== COMPARISON (same XHTML content, 3 methods) ===\n";
+  std::cout << "File nodes:   " << fileNodes.size() << "\n";
+  std::cout << "Memory nodes: " << memoryNodes.size() << "\n";
+  std::cout << "Stream nodes: " << streamNodes.size() << "\n";
+
+  bool allMatch = true;
+
+  // Compare file vs memory
+  if (fileNodes.size() != memoryNodes.size()) {
+    std::cout << "\nERROR: File vs Memory node count mismatch!\n";
+    allMatch = false;
+    runner.expectTrue(false, "Memory parsing should produce same node count as file parsing");
+  } else {
+    std::cout << "\n✓ File and Memory produced same node count\n";
+    runner.expectTrue(true, "Memory parsing produces correct node count");
+  }
+
+  // Compare file vs stream
+  if (fileNodes.size() != streamNodes.size()) {
+    std::cout << "ERROR: File vs Stream node count mismatch!\n";
+    allMatch = false;
+    runner.expectTrue(false, "Stream parsing should produce same node count as file parsing");
+  } else {
+    std::cout << "✓ File and Stream produced same node count\n";
+    runner.expectTrue(true, "Stream parsing produces correct node count");
+  }
+
+  // Compare memory vs stream
+  if (memoryNodes.size() != streamNodes.size()) {
+    std::cout << "ERROR: Memory vs Stream node count mismatch!\n";
+    allMatch = false;
+  } else {
+    std::cout << "✓ Memory and Stream produced same node count\n";
+  }
+
+  if (allMatch) {
+    std::cout << "\n*** ALL THREE METHODS PRODUCED IDENTICAL NODE COUNTS ***\n";
+
+    // Compare first few nodes from all three methods
+    int mismatchCount = 0;
+    for (size_t i = 0; i < std::min((size_t)10, fileNodes.size()); i++) {
+      bool nodeMatches = true;
+      if (fileNodes[i].type != memoryNodes[i].type || fileNodes[i].name != memoryNodes[i].name) {
+        nodeMatches = false;
+      }
+      if (fileNodes[i].type != streamNodes[i].type || fileNodes[i].name != streamNodes[i].name) {
+        nodeMatches = false;
+      }
+
+      if (!nodeMatches) {
+        mismatchCount++;
+        std::cout << "\n  Node " << i << " mismatch:\n";
+        std::cout << "    File:   type=" << (int)fileNodes[i].type << " name=" << fileNodes[i].name.c_str() << "\n";
+        std::cout << "    Memory: type=" << (int)memoryNodes[i].type << " name=" << memoryNodes[i].name.c_str() << "\n";
+        std::cout << "    Stream: type=" << (int)streamNodes[i].type << " name=" << streamNodes[i].name.c_str() << "\n";
+      }
+    }
+
+    if (mismatchCount == 0) {
+      std::cout << "\n*** SUCCESS: First 10 nodes match perfectly across all methods ***\n";
+    } else {
+      std::cout << "\nWARNING: " << mismatchCount << " node mismatches in first 10\n";
+    }
+  }
 }
 
 int main() {
   TestUtils::TestRunner runner("SimpleXmlParser Position Test");
   const char* xhtmlPath = TestGlobals::g_testXhtmlPath;
 
-  readForwardNodes(runner, xhtmlPath);
-  testForwardBackwardSymmetry(runner, xhtmlPath);
-  testMidTextNavigation(runner, xhtmlPath);
+  std::cout << "Test XHTML: " << xhtmlPath << "\n\n";
+
+  // Original file-based test
+  std::cout << "=== Testing File-Based Parsing ===\n";
+  auto nodes = readForwardNodes(runner, xhtmlPath);
+  runner.expectTrue(!nodes.empty(), "Forward pass captured nodes", "", true);
+  std::cout << "File parsing: " << nodes.size() << " nodes\n";
+
+  // Test EPUB streaming - extracts XHTML from EPUB and compares all 3 parsing methods
+  testEpubStreamingParsing(runner, TestGlobals::g_testFilePath, 1);
 
   return runner.allPassed() ? 0 : 1;
 }

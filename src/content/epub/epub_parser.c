@@ -116,6 +116,30 @@ struct epub_reader {
   epub_error last_error;
 };
 
+/* Pull-based streaming context */
+struct epub_stream_context {
+  epub_reader* reader;
+  file_entry* entry;
+
+  /* Decompression state */
+  tinfl_decompressor* inflator;
+  uint8_t* memory_block; /* Single allocation for inflator + buffers */
+  uint8_t* in_buf;       /* Input buffer for compressed data */
+  uint8_t* dict;         /* Decompression dictionary (32KB) */
+
+  size_t chunk_size;
+  size_t in_remaining;  /* Compressed bytes left to read */
+  size_t in_buf_size;   /* Valid bytes in input buffer */
+  size_t in_buf_ofs;    /* Current offset in input buffer */
+  size_t dict_ofs;      /* Write offset in dictionary (where next decompressed data goes) */
+  size_t dict_read_ofs; /* Read offset in dictionary (where next output should come from) */
+  size_t dict_avail;    /* Bytes available in dictionary for reading */
+
+  tinfl_status status;
+  int done;  /* 1 if decompression complete */
+  int error; /* 1 if error occurred */
+};
+
 /* Find end of central directory record */
 static int find_end_central_dir(FILE_HANDLE fp, zip_end_central_dir* eocd) {
   uint8_t buf[1024];
@@ -500,6 +524,256 @@ epub_error epub_extract_streaming(epub_reader* reader, uint32_t file_index, epub
     return EPUB_OK;
   }
   return EPUB_ERROR_EXTRACTION_FAILED;
+}
+
+/* -------------------- Pull-based Streaming API -------------------- */
+
+epub_stream_context* epub_start_streaming(epub_reader* reader, uint32_t file_index, size_t chunk_size) {
+  if (!reader || file_index >= reader->file_count) {
+    return NULL;
+  }
+
+  if (chunk_size == 0) {
+    chunk_size = DEFAULT_CHUNK_SIZE;
+  }
+
+  file_entry* entry = &reader->files[file_index];
+
+  /* Allocate context */
+  epub_stream_context* ctx = (epub_stream_context*)calloc(1, sizeof(epub_stream_context));
+  if (!ctx) {
+    return NULL;
+  }
+
+  ctx->reader = reader;
+  ctx->entry = entry;
+  ctx->chunk_size = chunk_size;
+  ctx->done = 0;
+  ctx->error = 0;
+
+  /* Only DEFLATE compression supported for streaming (stored files are simple enough to handle inline) */
+  if (entry->compression != 8 && entry->compression != 0) {
+    free(ctx);
+    return NULL;
+  }
+
+#ifdef USE_ARDUINO_FILE
+  FILE_HANDLE fp = reader->file_handle;
+#else
+  FILE_HANDLE fp = reader->fp;
+#endif
+
+  /* Seek to local file header */
+  file_seek_impl(fp, entry->local_header_offset, SEEK_SET);
+
+  /* Read local header to skip to data */
+  uint32_t sig;
+  uint16_t version_needed, flags, compression_method;
+  file_read_impl(&sig, 4, 1, fp);
+  if (sig != ZIP_LOCAL_HEADER_SIG) {
+    free(ctx);
+    return NULL;
+  }
+
+  file_read_impl(&version_needed, 2, 1, fp);
+  file_read_impl(&flags, 2, 1, fp);
+  file_read_impl(&compression_method, 2, 1, fp);
+
+  file_seek_impl(fp, 16, SEEK_CUR);
+  uint16_t filename_len, extra_len;
+  file_read_impl(&filename_len, 2, 1, fp);
+  file_read_impl(&extra_len, 2, 1, fp);
+
+  file_seek_impl(fp, filename_len + extra_len, SEEK_CUR);
+
+  /* Now at compressed data */
+
+  if (entry->compression == 8) {
+    /* DEFLATE - allocate decompression buffers */
+    size_t total_size = sizeof(tinfl_decompressor) + chunk_size + TINFL_LZ_DICT_SIZE;
+    ctx->memory_block = (uint8_t*)malloc(total_size);
+    if (!ctx->memory_block) {
+      free(ctx);
+      return NULL;
+    }
+
+    /* Partition the block */
+    ctx->inflator = (tinfl_decompressor*)ctx->memory_block;
+    ctx->in_buf = ctx->memory_block + sizeof(tinfl_decompressor);
+    ctx->dict = ctx->in_buf + chunk_size;
+
+    memset(ctx->inflator, 0, sizeof(tinfl_decompressor));
+    memset(ctx->dict, 0, TINFL_LZ_DICT_SIZE);
+    tinfl_init(ctx->inflator);
+
+    ctx->in_remaining = entry->compressed_size;
+    ctx->in_buf_size = 0;
+    ctx->in_buf_ofs = 0;
+    ctx->dict_ofs = 0;
+    ctx->dict_read_ofs = 0;
+    ctx->dict_avail = 0;
+    ctx->status = TINFL_STATUS_NEEDS_MORE_INPUT;
+  } else {
+    /* Stored (uncompressed) - simpler, just need input buffer */
+    ctx->memory_block = (uint8_t*)malloc(chunk_size);
+    if (!ctx->memory_block) {
+      free(ctx);
+      return NULL;
+    }
+    ctx->in_buf = ctx->memory_block;
+    ctx->in_remaining = entry->uncompressed_size;
+  }
+
+  return ctx;
+}
+
+int epub_read_chunk(epub_stream_context* ctx, void* buffer, size_t max_size) {
+  if (!ctx || ctx->error) {
+    return -1;
+  }
+
+  if (ctx->done) {
+    return 0; /* EOF */
+  }
+
+#ifdef USE_ARDUINO_FILE
+  FILE_HANDLE fp = ctx->reader->file_handle;
+#else
+  FILE_HANDLE fp = ctx->reader->fp;
+#endif
+
+  if (ctx->entry->compression == 0) {
+    /* Stored (uncompressed) - just read directly */
+    if (ctx->in_remaining == 0) {
+      ctx->done = 1;
+      return 0;
+    }
+
+    size_t to_read = (ctx->in_remaining < max_size) ? ctx->in_remaining : max_size;
+    size_t read_size = file_read_impl(buffer, 1, to_read, fp);
+    if (read_size == 0) {
+      ctx->error = 1;
+      return -1;
+    }
+
+    ctx->in_remaining -= read_size;
+    if (ctx->in_remaining == 0) {
+      ctx->done = 1;
+    }
+
+    return (int)read_size;
+
+  } else if (ctx->entry->compression == 8) {
+    /* DEFLATE - decompress next chunk */
+    size_t output_ofs = 0;
+
+    /* First, output any remaining data from previous decompression that didn't fit */
+    while (output_ofs < max_size && ctx->dict_avail > 0) {
+      size_t to_copy = ctx->dict_avail;
+      if (output_ofs + to_copy > max_size) {
+        to_copy = max_size - output_ofs;
+      }
+
+      /* Handle wraparound in circular dictionary buffer */
+      size_t first_chunk = TINFL_LZ_DICT_SIZE - ctx->dict_read_ofs;
+      if (first_chunk > to_copy) {
+        first_chunk = to_copy;
+      }
+
+      memcpy((uint8_t*)buffer + output_ofs, ctx->dict + ctx->dict_read_ofs, first_chunk);
+      output_ofs += first_chunk;
+      ctx->dict_read_ofs = (ctx->dict_read_ofs + first_chunk) & (TINFL_LZ_DICT_SIZE - 1);
+      ctx->dict_avail -= first_chunk;
+
+      /* If there's more and we wrapped around */
+      if (first_chunk < to_copy && ctx->dict_avail > 0) {
+        size_t second_chunk = to_copy - first_chunk;
+        memcpy((uint8_t*)buffer + output_ofs, ctx->dict + ctx->dict_read_ofs, second_chunk);
+        output_ofs += second_chunk;
+        ctx->dict_read_ofs = (ctx->dict_read_ofs + second_chunk) & (TINFL_LZ_DICT_SIZE - 1);
+        ctx->dict_avail -= second_chunk;
+      }
+    }
+
+    /* If buffer is full or we're done, return what we have */
+    if (output_ofs >= max_size || ctx->done) {
+      return (int)output_ofs;
+    }
+
+    /* Decompress more data */
+    while (output_ofs < max_size &&
+           (ctx->status == TINFL_STATUS_NEEDS_MORE_INPUT || ctx->status == TINFL_STATUS_HAS_MORE_OUTPUT)) {
+      /* Read more compressed data if needed */
+      if (ctx->in_buf_ofs >= ctx->in_buf_size && ctx->in_remaining > 0) {
+        size_t to_read = (ctx->in_remaining < ctx->chunk_size) ? ctx->in_remaining : ctx->chunk_size;
+        ctx->in_buf_size = file_read_impl(ctx->in_buf, 1, to_read, fp);
+        if (ctx->in_buf_size == 0) {
+          ctx->error = 1;
+          return -1;
+        }
+        ctx->in_remaining -= ctx->in_buf_size;
+        ctx->in_buf_ofs = 0;
+      }
+
+      size_t in_bytes = ctx->in_buf_size - ctx->in_buf_ofs;
+      size_t out_bytes = TINFL_LZ_DICT_SIZE - ctx->dict_ofs;
+
+      mz_uint32 flags = 0;
+      if (ctx->in_remaining > 0) {
+        flags |= TINFL_FLAG_HAS_MORE_INPUT;
+      }
+
+      ctx->status = tinfl_decompress_raw(ctx->inflator, ctx->in_buf + ctx->in_buf_ofs, &in_bytes, ctx->dict,
+                                         ctx->dict + ctx->dict_ofs, &out_bytes, flags);
+
+      ctx->in_buf_ofs += in_bytes;
+
+      if (out_bytes > 0) {
+        /* Copy decompressed data to output buffer */
+        size_t to_copy = out_bytes;
+        if (output_ofs + to_copy > max_size) {
+          to_copy = max_size - output_ofs;
+        }
+
+        memcpy((uint8_t*)buffer + output_ofs, ctx->dict + ctx->dict_ofs, to_copy);
+        output_ofs += to_copy;
+
+        /* Advance write position in dictionary */
+        ctx->dict_ofs = (ctx->dict_ofs + out_bytes) & (TINFL_LZ_DICT_SIZE - 1);
+
+        /* If we couldn't copy all, save the remainder for next call */
+        if (to_copy < out_bytes) {
+          ctx->dict_read_ofs = (ctx->dict_ofs - (out_bytes - to_copy)) & (TINFL_LZ_DICT_SIZE - 1);
+          ctx->dict_avail = out_bytes - to_copy;
+          break;
+        }
+      }
+
+      if (ctx->status < TINFL_STATUS_DONE) {
+        ctx->error = 1;
+        return -1;
+      }
+
+      if (ctx->status == TINFL_STATUS_DONE) {
+        ctx->done = 1;
+        break;
+      }
+    }
+
+    return (int)output_ofs;
+  }
+
+  ctx->error = 1;
+  return -1;
+}
+
+void epub_end_streaming(epub_stream_context* ctx) {
+  if (ctx) {
+    if (ctx->memory_block) {
+      free(ctx->memory_block);
+    }
+    free(ctx);
+  }
 }
 
 const char* epub_get_error_string(epub_error error) {

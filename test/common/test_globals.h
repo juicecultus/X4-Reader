@@ -53,9 +53,11 @@ namespace TestGlobals {
 // The test repository contains bobiverse one.epub; update the test path to match an existing file.
 inline const char* g_testFilePath = "resources/books/mabuse.epub";
 // inline const char* g_testFilePath = "resources/books/bobiverse one.epub";
+// inline const char* g_testFilePath = "resources/books/mabuse.xhtml";
 
 // XHTML test file path
 inline const char* g_testXhtmlPath = "resources/books/mabuse.xhtml";
+// inline const char* g_testXhtmlPath = "resources/books/bobiverse one.xhtml";
 
 // ============================================================================
 // CONFIGURATION: Choose your layout strategy

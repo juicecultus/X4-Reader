@@ -15,6 +15,10 @@
  */
 class SimpleXmlParser {
  public:
+  // Callback type for streaming input
+  // Returns number of bytes read into buffer (0 for EOF, -1 for error)
+  typedef int (*StreamCallback)(char* buffer, size_t maxSize, void* userData);
+
   SimpleXmlParser();
   ~SimpleXmlParser();
 
@@ -23,6 +27,18 @@ class SimpleXmlParser {
    * Returns true if successful
    */
   bool open(const char* filepath);
+
+  /**
+   * Open XML from memory buffer for parsing
+   * Returns true if successful
+   */
+  bool openFromMemory(const char* data, size_t dataSize);
+
+  /**
+   * Open XML from streaming callback for parsing
+   * Returns true if successful
+   */
+  bool openFromStream(StreamCallback callback, void* userData);
 
   /**
    * Close the current file
@@ -48,13 +64,6 @@ class SimpleXmlParser {
    * Call getNodeType() to determine what was read
    */
   bool read();
-
-  /**
-   * Read previous node from XML stream (backward navigation)
-   * Returns true if a node was read, false if beginning of file
-   * Call getNodeType() to determine what was read
-   */
-  bool readBackward();
 
   /**
    * Get the type of the current node
@@ -99,49 +108,16 @@ class SimpleXmlParser {
    */
   bool hasMoreTextChars() const;
 
-  /**
-   * Check if there are more characters backward in current text node
-   * Only valid when on a Text node
-   */
-  bool hasMoreTextCharsBackward() const;
-
-  /**
-   * Peek at previous character in current text node without moving backward
-   * Only valid when on a Text node
-   */
-  char peekPrevTextNodeChar();
-
-  /**
-   * Read previous character from current text node, moving backward
-   * Only valid when on a Text node
-   */
-  char readPrevTextNodeChar();
-
   // Text node reading helpers
   char readTextNodeCharForward();
-  char readTextNodeCharBackward();
 
   /**
-   * Seek to a specific file position.
-   * After seeking, you must call read() or readBackward() to parse a node.
-   * Returns true if successful
-   */
-  bool seekToFilePosition(size_t pos);
-
-  /**
-   * Get current file position
-   * For text nodes: returns current position within the text
-   * For elements: returns the start of the element (where '<' begins)
-   * This ensures seeking to this position will re-read the same node
+   * Get current file position (the cursor)
    */
   size_t getFilePosition() const {
-    // When in a text node, return the current position within the text
+    // For text nodes, return the current position within the text
     if (currentNodeType_ == Text) {
       return textNodeCurrentPos_;
-    }
-    // For elements, return the start position so seeking here re-reads the element
-    if (currentNodeType_ == Element || currentNodeType_ == EndElement) {
-      return elementStartPos_;
     }
     return filePos_;
   }
@@ -166,21 +142,45 @@ class SimpleXmlParser {
    * Get total file size
    */
   size_t getFileSize() const {
+    if (usingMemory_) {
+      return memorySize_;
+    }
     if (!file_) {
       return 0;
     }
     return file_.size();
   }
 
+  size_t textNodeStartPos_;  // File position where text node content starts
+  size_t textNodeEndPos_;    // File position where text node content ends
+
  private:
   File file_;
+  const char* memoryData_;  // Pointer to memory buffer (if parsing from memory)
+  size_t memorySize_;       // Size of memory buffer
+  bool usingMemory_;        // True if parsing from memory instead of file
+
+  // Streaming mode
+  StreamCallback streamCallback_;  // Callback for streaming input
+  void* streamUserData_;           // User data for callback
+  bool usingStream_;               // True if parsing from stream
+  size_t streamPosition_;          // Current position in stream (total bytes read)
+  bool streamEOF_;                 // True when stream has reached EOF
 
   // Buffering for faster I/O
   static const size_t BUFFER_SIZE = 8192;
-  uint8_t buffer_[BUFFER_SIZE];
+  static const size_t NUM_STREAM_BUFFERS = 3;  // Number of sliding window buffers for streaming
+
+  uint8_t* buffer_;        // Primary buffer for file/memory mode (heap allocated to avoid stack overflow)
   size_t bufferStartPos_;  // File position of first byte in buffer
   size_t bufferLen_;       // Number of valid bytes in buffer
   size_t filePos_;         // Current position in file
+
+  // Streaming sliding window buffers
+  uint8_t* streamBuffers_[NUM_STREAM_BUFFERS];      // Array of buffer pointers
+  size_t streamBufferStarts_[NUM_STREAM_BUFFERS];   // Start position of each buffer
+  size_t streamBufferLengths_[NUM_STREAM_BUFFERS];  // Length of each buffer
+  int streamCurrentBuffer_;                         // Index of most recently filled buffer
 
   // Helper functions
   char getByteAt(size_t pos);         // Get byte at any position, loading buffer if needed
@@ -203,14 +203,13 @@ class SimpleXmlParser {
   std::vector<Attribute> attributes_;
 
   // Text node reading state
-  size_t textNodeStartPos_;     // File position where text node content starts
-  size_t textNodeEndPos_;       // File position where text node content ends
   size_t textNodeCurrentPos_;   // Current position within text node
   char peekedTextNodeChar_;     // Cached character for peekTextNodeChar
   bool hasPeekedTextNodeChar_;  // Whether we have a peeked character
-  // Backward text node reading state
-  char peekedPrevTextNodeChar_;
-  bool hasPeekedPrevTextNodeChar_;
+
+  // Text buffer for streaming mode (can't seek back, so buffer text when found)
+  String streamTextBuffer_;     // Buffered text content for streaming mode
+  size_t streamTextBufferPos_;  // Current read position in buffered text
 
   // Element/node position tracking
   size_t elementStartPos_;  // Start position of current element in file

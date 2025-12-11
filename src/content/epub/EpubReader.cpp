@@ -287,6 +287,60 @@ String EpubReader::getFile(const char* filename) {
   return getExtractedPath(filename);
 }
 
+bool EpubReader::extractToMemory(const char* filename, int (*callback)(const void*, size_t, void*), void* userData) {
+  Serial.printf("\n=== Extracting %s to memory ===\n", filename);
+
+  // Open EPUB if not already open
+  if (!openEpub()) {
+    return false;
+  }
+
+  // Find the file in the EPUB
+  uint32_t fileIndex;
+  epub_error err = epub_locate_file(reader_, filename, &fileIndex);
+  if (err != EPUB_OK) {
+    Serial.printf("ERROR: File not found in EPUB: %s\n", filename);
+    return false;
+  }
+
+  // Get file info
+  epub_file_info info;
+  err = epub_get_file_info(reader_, fileIndex, &info);
+  if (err != EPUB_OK) {
+    Serial.printf("ERROR: Failed to get file info: %s\n", epub_get_error_string(err));
+    return false;
+  }
+
+  Serial.printf("Found file at index %d (size: %u bytes)\n", fileIndex, info.uncompressed_size);
+
+  // Extract using streaming API with provided callback
+  err = epub_extract_streaming(reader_, fileIndex, callback, userData, 4096);
+  if (err != EPUB_OK) {
+    Serial.printf("ERROR: Extraction failed: %s\n", epub_get_error_string(err));
+    return false;
+  }
+
+  Serial.printf("Successfully extracted %s to memory\n", filename);
+  return true;
+}
+
+epub_stream_context* EpubReader::startStreaming(const char* filename, size_t chunk_size) {
+  // Open EPUB if not already open
+  if (!openEpub()) {
+    return nullptr;
+  }
+
+  // Find the file in the EPUB
+  uint32_t fileIndex;
+  epub_error err = epub_locate_file(reader_, filename, &fileIndex);
+  if (err != EPUB_OK) {
+    return nullptr;
+  }
+
+  // Start pull-based streaming
+  return epub_start_streaming(reader_, fileIndex, chunk_size);
+}
+
 String EpubReader::getChapterNameForSpine(int spineIndex) const {
   // Get the spine item
   const SpineItem* spineItem = getSpineItem(spineIndex);

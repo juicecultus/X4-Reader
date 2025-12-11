@@ -6,10 +6,9 @@
 #include <cstdint>
 #include <vector>
 
-#include "../css/CssParser.h"
-#include "../css/CssStyle.h"
 #include "../epub/EpubReader.h"
 #include "../xml/SimpleXmlParser.h"
+#include "FileWordProvider.h"
 #include "StringWordProvider.h"
 #include "WordProvider.h"
 
@@ -53,32 +52,45 @@ class EpubWordProvider : public WordProvider {
 
   // Style support
   CssStyle getCurrentStyle() override {
-    return currentStyle_;
+    return CssStyle();
   }
   bool hasStyleSupport() override {
-    return cssParser_ != nullptr;
+    return false;
+  }
+
+  // Streaming conversion mode (true = extract to memory, false = extract to file first)
+  void setUseStreamingConversion(bool enabled) {
+    useStreamingConversion_ = enabled;
+  }
+  bool getUseStreamingConversion() const {
+    return useStreamingConversion_;
   }
 
  private:
   // Opens a specific chapter (spine item) for reading
   bool openChapter(int chapterIndex);
 
-  // Skip an element and all its children (for non-content elements like head, style, script)
-  // elementName: the name of the element to skip
-  // forward: true to skip forward (from start tag to end tag), false to skip backward (from end tag to start tag)
-  // Returns true if successful, false if reached end/beginning of document
-  bool skipElement(const String& elementName, bool forward);
+  // Helper to check if an element is a block-level element
+  bool isBlockElement(const String& name);
 
-  // Skip ahead to the next content (text or block element) or end of file
-  // Used after returning a newline for block element end tags to ensure hasNextWord() returns false
-  // when there's no more actual content
-  void skipToNextContent();
+  // Helper to check if an element's content should be skipped (head, title, style, script)
+  bool isSkippedElement(const String& name);
 
-  // Update the current style based on the element's class attribute
-  void updateStyleForElement();
+  // Helper to check if an element is a header element (h1-h6)
+  bool isHeaderElement(const String& name);
+
+  // Convert an XHTML file to a plain-text file suitable for FileWordProvider.
+  bool convertXhtmlToTxt(const String& srcPath, String& outTxtPath);
+
+  // Convert XHTML from EPUB stream to plain-text file (no intermediate XHTML file)
+  bool convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath);
+
+  // Common conversion logic used by both convertXhtmlToTxt and convertXhtmlStreamToTxt
+  void performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out);
 
   bool valid_ = false;
-  bool isEpub_ = false;  // True if source is EPUB, false if direct XHTML
+  bool isEpub_ = false;                 // True if source is EPUB, false if direct XHTML
+  bool useStreamingConversion_ = true;  // True = stream from EPUB to memory, false = extract XHTML file first
   size_t bufSize_ = 0;
 
   String epubPath_;
@@ -88,13 +100,11 @@ class EpubWordProvider : public WordProvider {
   SimpleXmlParser* parser_ = nullptr;
   int currentChapter_ = 0;  // Current chapter index (0-based)
 
-  size_t prevFilePos_ = 0;      // Previous parser position for ungetWord()
-  size_t fileSize_;             // Total file size for percentage calculation
-  size_t firstContentPos_ = 0;  // Position of first readable content in chapter
+  // Underlying provider that reads the converted plain-text chapter files
+  FileWordProvider* fileProvider_ = nullptr;
 
-  // CSS style tracking
-  const CssParser* cssParser_ = nullptr;  // Borrowed from EpubReader, not owned
-  CssStyle currentStyle_;                 // Currently active style (updated when entering elements)
+  size_t fileSize_;          // Total file size for percentage calculation
+  size_t currentIndex_ = 0;  // Current index/offset (seeking disabled; tracked locally)
 };
 
 #endif

@@ -105,6 +105,12 @@ struct MockESP {
   uint32_t getFreeHeap() {
     return 100000;  // Return a reasonable fake value
   }
+  uint32_t getHeapSize() {
+    return 320000;  // Return a reasonable fake total heap size
+  }
+  uint32_t getMinFreeHeap() {
+    return 80000;  // Return a reasonable fake minimum free heap
+  }
 };
 
 extern MockESP ESP;

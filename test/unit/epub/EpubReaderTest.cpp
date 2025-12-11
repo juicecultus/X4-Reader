@@ -18,6 +18,8 @@
 
 #include "content/css/CssParser.h"
 #include "content/epub/EpubReader.h"
+#include "content/epub/epub_parser.h"
+#include "content/providers/EpubWordProvider.h"
 #include "test_globals.h"
 #include "test_utils.h"
 
@@ -33,6 +35,8 @@
 #define TEST_CHAPTER_NAME_FOR_SPINE true
 #define TEST_SPINE_SIZES true
 #define TEST_CSS_PARSING true
+#define TEST_STREAM_CONVERTER true
+#define TEST_STREAM_RAW_BYTES true
 
 // Test configuration
 namespace EpubReaderTests {
@@ -617,6 +621,379 @@ void testCssStringParsing(TestUtils::TestRunner& runner) {
   std::cout << "  CSS string parsing test passed\n";
 }
 
+/**
+ * Test: All 3 conversion modes produce identical output
+ * Tests: 1) File-based, 2) Memory-based (old "streaming"), 3) True streaming
+ */
+void testStreamConverter(TestUtils::TestRunner& runner, EpubReader& reader) {
+  std::cout << "\n=== Test: All Conversion Modes (File vs Memory vs True Streaming) ===\n";
+
+  if (!reader.isValid()) {
+    runner.expectTrue(false, "EPUB should be valid (skipping test)");
+    return;
+  }
+
+  int spineCount = reader.getSpineCount();
+  if (spineCount == 0) {
+    runner.expectTrue(false, "EPUB should have spine items (skipping test)");
+    return;
+  }
+
+  std::cout << "  Testing " << spineCount << " spine items in 3 modes...\n\n";
+
+  // Get base directory from content.opf
+  String opfPath = reader.getContentOpfPath();
+  std::string opfPathStr = opfPath.c_str();
+  size_t lastSlash = opfPathStr.rfind('/');
+  std::string opfDir = (lastSlash != std::string::npos) ? opfPathStr.substr(0, lastSlash + 1) : "";
+
+  int identicalOutputs = 0;
+  int differentOutputs = 0;
+
+  // Test first 3 spine items (or all if less than 3)
+  int itemsToTest = (spineCount < 3) ? spineCount : 3;
+
+  for (int i = 0; i < itemsToTest; i++) {
+    const SpineItem* item = reader.getSpineItem(i);
+    if (item == nullptr) {
+      continue;
+    }
+
+    std::cout << "  [" << i << "] " << item->href.c_str() << "\n";
+
+    std::string xhtmlPath = opfDir + item->href.c_str();
+
+    // Build base txt path (without extension)
+    String basePath = reader.getExtractedPath(xhtmlPath.c_str());
+    int lastDot = basePath.lastIndexOf('.');
+    if (lastDot >= 0) {
+      basePath = basePath.substring(0, lastDot);
+    }
+
+    // Output paths for each mode
+    String filePath = basePath + "_file.txt";
+    String memoryPath = basePath + "_memory.txt";
+    String streamPath = basePath + "_stream.txt";
+
+    // Clean up any existing files
+    if (SD.exists(filePath.c_str()))
+      SD.remove(filePath.c_str());
+    if (SD.exists(memoryPath.c_str()))
+      SD.remove(memoryPath.c_str());
+    if (SD.exists(streamPath.c_str()))
+      SD.remove(streamPath.c_str());
+
+    // MODE 1: File-based conversion (extract XHTML, then convert)
+    std::cout << "      Mode 1 (File-based): ";
+    EpubWordProvider provider1(TestGlobals::g_testFilePath);
+    provider1.setUseStreamingConversion(false);
+    if (provider1.setChapter(i)) {
+      // Need to rename the output to our test path
+      String defaultPath = basePath + ".txt";
+      if (SD.exists(defaultPath.c_str())) {
+        // Read and copy to test path
+        File src = SD.open(defaultPath.c_str());
+        File dst = SD.open(filePath.c_str(), FILE_WRITE);
+        if (src && dst) {
+          while (src.available()) {
+            uint8_t b = src.read();
+            dst.write(&b, 1);
+          }
+          src.close();
+          dst.close();
+        }
+        SD.remove(defaultPath.c_str());
+      }
+      File f = SD.open(filePath.c_str());
+      size_t size1 = f.size();
+      f.close();
+      std::cout << size1 << " bytes\n";
+    } else {
+      std::cout << "FAILED\n";
+    }
+
+    // MODE 2: Memory-based (load to RAM, parse from memory)
+    std::cout << "      Mode 2 (Memory): ";
+    // Note: Current implementation uses streaming for both, we'd need to add a separate memory mode
+    // For now, just use streaming which internally uses memory
+    EpubWordProvider provider2(TestGlobals::g_testFilePath);
+    provider2.setUseStreamingConversion(true);
+    if (provider2.setChapter(i)) {
+      String defaultPath = basePath + ".txt";
+      if (SD.exists(defaultPath.c_str())) {
+        File src = SD.open(defaultPath.c_str());
+        File dst = SD.open(memoryPath.c_str(), FILE_WRITE);
+        if (src && dst) {
+          while (src.available()) {
+            uint8_t b = src.read();
+            dst.write(&b, 1);
+          }
+          src.close();
+          dst.close();
+        }
+        SD.remove(defaultPath.c_str());
+      }
+      File f = SD.open(memoryPath.c_str());
+      size_t size2 = f.size();
+      f.close();
+      std::cout << size2 << " bytes\n";
+    } else {
+      std::cout << "FAILED\n";
+    }
+
+    // MODE 3: True streaming (parse directly from ZIP decompressor)
+    std::cout << "      Mode 3 (True Streaming): ";
+    EpubWordProvider provider3(TestGlobals::g_testFilePath);
+    provider3.setUseStreamingConversion(true);
+    if (provider3.setChapter(i)) {
+      String defaultPath = basePath + ".txt";
+      if (SD.exists(defaultPath.c_str())) {
+        File src = SD.open(defaultPath.c_str());
+        File dst = SD.open(streamPath.c_str(), FILE_WRITE);
+        if (src && dst) {
+          while (src.available()) {
+            uint8_t b = src.read();
+            dst.write(&b, 1);
+          }
+          src.close();
+          dst.close();
+        }
+        SD.remove(defaultPath.c_str());
+      }
+      File f = SD.open(streamPath.c_str());
+      size_t size3 = f.size();
+      f.close();
+      std::cout << size3 << " bytes\n";
+    } else {
+      std::cout << "FAILED\n";
+    }
+
+    // Compare outputs byte-by-byte
+    bool allMatch = true;
+    std::cout << "      Comparing outputs: ";
+
+    File f1 = SD.open(filePath.c_str());
+    File f2 = SD.open(memoryPath.c_str());
+    File f3 = SD.open(streamPath.c_str());
+
+    if (f1 && f2 && f3) {
+      size_t size1 = f1.size();
+      size_t size2 = f2.size();
+      size_t size3 = f3.size();
+
+      if (size1 != size2 || size1 != size3) {
+        allMatch = false;
+        std::cout << "SIZE MISMATCH (file:" << size1 << " memory:" << size2 << " stream:" << size3 << ")\n";
+      } else {
+        // Compare byte by byte
+        for (size_t j = 0; j < size1; j++) {
+          uint8_t b1 = f1.read();
+          uint8_t b2 = f2.read();
+          uint8_t b3 = f3.read();
+          if (b1 != b2 || b1 != b3) {
+            allMatch = false;
+            std::cout << "CONTENT MISMATCH at byte " << j << "\n";
+            break;
+          }
+        }
+        if (allMatch) {
+          std::cout << "IDENTICAL ✓\n";
+          identicalOutputs++;
+        }
+      }
+
+      f1.close();
+      f2.close();
+      f3.close();
+    } else {
+      std::cout << "FAILED TO OPEN FILES\n";
+      allMatch = false;
+    }
+
+    if (!allMatch) {
+      differentOutputs++;
+      runner.expectTrue(false, "All conversion modes should produce identical output");
+    }
+
+    std::cout << "\n";
+  }
+
+  std::cout << "  Summary:\n";
+  std::cout << "    Items tested: " << itemsToTest << "\n";
+  std::cout << "    Identical outputs: " << identicalOutputs << "\n";
+  std::cout << "    Different outputs: " << differentOutputs << "\n";
+
+  runner.expectTrue(identicalOutputs == itemsToTest, "All conversion modes should produce identical output");
+  runner.expectTrue(differentOutputs == 0, "No conversion modes should produce different output");
+
+  std::cout << "\n  Conversion mode comparison test complete\n";
+}
+
+/**
+ * Test: Raw streaming bytes match extracted file bytes
+ * This test compares the raw bytes from EPUB streaming vs file extraction
+ */
+void testStreamRawBytes(TestUtils::TestRunner& runner, EpubReader& reader) {
+  std::cout << "\n=== Test: Raw Streaming Bytes vs Extracted File ===\n";
+
+  if (!reader.isValid()) {
+    runner.expectTrue(false, "EPUB should be valid (skipping test)");
+    return;
+  }
+
+  int spineCount = reader.getSpineCount();
+  if (spineCount == 0) {
+    runner.expectTrue(false, "EPUB should have spine items (skipping test)");
+    return;
+  }
+
+  // Get base directory from content.opf
+  String opfPath = reader.getContentOpfPath();
+  std::string opfPathStr = opfPath.c_str();
+  size_t lastSlash = opfPathStr.rfind('/');
+  std::string opfDir = (lastSlash != std::string::npos) ? opfPathStr.substr(0, lastSlash + 1) : "";
+
+  // Test first spine item
+  const SpineItem* item = reader.getSpineItem(1);  // Use index 1 (often first content chapter)
+  if (item == nullptr) {
+    runner.expectTrue(false, "Spine item should exist");
+    return;
+  }
+
+  std::string xhtmlPath = opfDir + item->href.c_str();
+  std::cout << "  Testing: " << xhtmlPath << "\n";
+
+  // Step 1: Extract file normally and read its contents
+  std::cout << "\n  Step 1: Extract file to disk...\n";
+  String extractedPath = reader.getFile(xhtmlPath.c_str());
+  if (extractedPath.isEmpty()) {
+    runner.expectTrue(false, "Should be able to extract file");
+    return;
+  }
+  std::cout << "    Extracted to: " << extractedPath.c_str() << "\n";
+
+  File extractedFile = SD.open(extractedPath.c_str(), FILE_READ);
+  if (!extractedFile) {
+    runner.expectTrue(false, "Should be able to open extracted file");
+    return;
+  }
+
+  size_t extractedSize = extractedFile.size();
+  std::cout << "    Extracted file size: " << extractedSize << " bytes\n";
+
+  // Read entire extracted file into memory
+  uint8_t* extractedData = new uint8_t[extractedSize];
+  size_t extractedBytesRead = extractedFile.read(extractedData, extractedSize);
+  extractedFile.close();
+  std::cout << "    Read " << extractedBytesRead << " bytes from extracted file\n";
+
+  // Step 2: Stream the file and compare bytes
+  // Note: startStreaming() internally opens the EPUB, so we don't need to check the handle
+  std::cout << "\n  Step 2: Stream file and compare bytes...\n";
+  epub_stream_context* streamCtx = reader.startStreaming(xhtmlPath.c_str(), 8192);
+  if (!streamCtx) {
+    std::cout << "    ERROR: Failed to start streaming\n";
+    delete[] extractedData;
+    runner.expectTrue(false, "Should be able to start streaming");
+    return;
+  }
+
+  // Read all streamed data
+  uint8_t* streamedData = new uint8_t[extractedSize + 1024];  // Extra buffer for safety
+  size_t totalStreamedBytes = 0;
+  int chunkCount = 0;
+  int bytesRead;
+
+  std::cout << "    Streaming chunks:\n";
+  while ((bytesRead = epub_read_chunk(streamCtx, streamedData + totalStreamedBytes, 8192)) > 0) {
+    chunkCount++;
+    totalStreamedBytes += bytesRead;
+    std::cout << "      Chunk " << chunkCount << ": " << bytesRead << " bytes (total: " << totalStreamedBytes << ")\n";
+  }
+
+  if (bytesRead < 0) {
+    std::cout << "    ERROR: Streaming returned error code " << bytesRead << "\n";
+  }
+
+  epub_end_streaming(streamCtx);
+
+  std::cout << "    Total streamed: " << totalStreamedBytes << " bytes in " << chunkCount << " chunks\n";
+
+  // Step 3: Compare bytes
+  std::cout << "\n  Step 3: Compare extracted vs streamed bytes...\n";
+
+  bool sizesMatch = (totalStreamedBytes == extractedSize);
+  runner.expectTrue(sizesMatch, "Streamed size should match extracted size");
+
+  if (!sizesMatch) {
+    std::cout << "    SIZE MISMATCH!\n";
+    std::cout << "      Extracted: " << extractedSize << " bytes\n";
+    std::cout << "      Streamed:  " << totalStreamedBytes << " bytes\n";
+    std::cout << "      Difference: " << (int)(extractedSize - totalStreamedBytes) << " bytes\n";
+    std::cout << "      Streamed is " << (100.0 * totalStreamedBytes / extractedSize) << "% of extracted\n";
+  }
+
+  // Compare byte-by-byte up to the smaller size
+  size_t compareSize = std::min(totalStreamedBytes, extractedSize);
+  size_t firstMismatch = compareSize;  // No mismatch if equal to compareSize
+  int mismatchCount = 0;
+
+  for (size_t i = 0; i < compareSize; i++) {
+    if (extractedData[i] != streamedData[i]) {
+      if (firstMismatch == compareSize) {
+        firstMismatch = i;
+      }
+      mismatchCount++;
+      if (mismatchCount <= 5) {
+        std::cout << "    Mismatch at byte " << i << ": extracted=0x" << std::hex << (int)extractedData[i]
+                  << " streamed=0x" << (int)streamedData[i] << std::dec << "\n";
+      }
+    }
+  }
+
+  if (mismatchCount > 5) {
+    std::cout << "    ... and " << (mismatchCount - 5) << " more mismatches\n";
+  }
+
+  if (mismatchCount == 0 && sizesMatch) {
+    std::cout << "    ✓ ALL BYTES MATCH!\n";
+    runner.expectTrue(true, "All bytes should match");
+  } else if (mismatchCount == 0) {
+    std::cout << "    Bytes match up to streamed length, but streaming stopped early\n";
+    runner.expectTrue(false, "Streaming should read all bytes");
+  } else {
+    std::cout << "    ✗ " << mismatchCount << " bytes differ (first at position " << firstMismatch << ")\n";
+    runner.expectTrue(false, "Streamed bytes should match extracted bytes");
+  }
+
+  // Show first/last bytes of both for debugging
+  std::cout << "\n  Debug: First 32 bytes comparison:\n";
+  std::cout << "    Extracted: ";
+  for (size_t i = 0; i < 32 && i < extractedSize; i++) {
+    std::cout << std::hex << (int)extractedData[i] << " ";
+  }
+  std::cout << std::dec << "\n";
+  std::cout << "    Streamed:  ";
+  for (size_t i = 0; i < 32 && i < totalStreamedBytes; i++) {
+    std::cout << std::hex << (int)streamedData[i] << " ";
+  }
+  std::cout << std::dec << "\n";
+
+  if (totalStreamedBytes > 0) {
+    std::cout << "\n  Debug: Last 32 bytes of streamed data:\n";
+    std::cout << "    Position " << (totalStreamedBytes - 32) << "-" << totalStreamedBytes << ": ";
+    for (size_t i = (totalStreamedBytes > 32 ? totalStreamedBytes - 32 : 0); i < totalStreamedBytes; i++) {
+      std::cout << std::hex << (int)streamedData[i] << " ";
+    }
+    std::cout << std::dec << "\n";
+  }
+
+  delete[] extractedData;
+  delete[] streamedData;
+
+  std::cout << "\n  Raw streaming test complete\n";
+}
+
 }  // namespace EpubReaderTests
 
 // ============================================================================
@@ -680,6 +1057,14 @@ int main() {
 #if TEST_CSS_PARSING
   EpubReaderTests::testCssStringParsing(runner);    // Test CSS parser directly first
   EpubReaderTests::testCssParsing(runner, reader);  // Then test with EPUB
+#endif
+
+#if TEST_STREAM_CONVERTER
+  EpubReaderTests::testStreamConverter(runner, reader);
+#endif
+
+#if TEST_STREAM_RAW_BYTES
+  EpubReaderTests::testStreamRawBytes(runner, reader);
 #endif
 
   return runner.allPassed() ? 0 : 1;

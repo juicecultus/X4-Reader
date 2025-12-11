@@ -73,6 +73,24 @@ class EpubReader {
   String getFile(const char* filename);
 
   /**
+   * Extract a file from EPUB to memory using callback
+   * Returns true if successful
+   */
+  bool extractToMemory(const char* filename, int (*callback)(const void*, size_t, void*), void* userData);
+
+  /**
+   * Start pull-based streaming extraction of a file
+   * Returns streaming context or nullptr on error
+   * chunk_size: internal buffer size (0 for default 8KB)
+   */
+  epub_stream_context* startStreaming(const char* filename, size_t chunk_size = 0);
+
+  /**
+   * Get the extract directory path (for building output paths)
+   */
+  String getExtractedPath(const char* filename);
+
+  /**
    * Get the chapter/section name for a given spine index
    * Looks up the spine item's href in the TOC and returns the title
    * Returns empty string if no matching TOC entry found
@@ -116,11 +134,17 @@ class EpubReader {
     return cssParser_;
   }
 
+  /**
+   * Get the underlying epub_reader handle (for debugging/testing)
+   */
+  epub_reader* getReader() const {
+    return reader_;
+  }
+
  private:
   bool openEpub();
   void closeEpub();
   bool ensureExtractDirExists();
-  String getExtractedPath(const char* filename);
   bool isFileExtracted(const char* filename);
   bool extractFile(const char* filename);
   bool parseContainer();

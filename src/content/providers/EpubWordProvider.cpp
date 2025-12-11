@@ -1,149 +1,7 @@
 #include "EpubWordProvider.h"
 
 #include <Arduino.h>
-
-// Helper to check if two strings are equal (case-insensitive)
-static bool equalsIgnoreCase(const String& str, const char* target) {
-  if (str.length() != strlen(target))
-    return false;
-  for (size_t i = 0; i < str.length(); i++) {
-    char c1 = str.charAt(i);
-    char c2 = target[i];
-    if (c1 >= 'A' && c1 <= 'Z')
-      c1 += 32;
-    if (c2 >= 'A' && c2 <= 'Z')
-      c2 += 32;
-    if (c1 != c2)
-      return false;
-  }
-  return true;
-}
-
-// Helper to check if element name is a non-content element that should be skipped entirely
-// (including all children, e.g., <head>, <style>, <script>)
-static bool isNonContentElement(const String& name) {
-  if (name.length() == 0)
-    return false;
-
-  const char* nonContentElements[] = {"head", "style", "script"};
-  for (size_t i = 0; i < sizeof(nonContentElements) / sizeof(nonContentElements[0]); i++) {
-    const char* elem = nonContentElements[i];
-    size_t elemLen = strlen(elem);
-    if (name.length() != elemLen)
-      continue;
-
-    bool match = true;
-    for (size_t j = 0; j < elemLen; j++) {
-      char c1 = name.charAt(j);
-      char c2 = elem[j];
-      if (c1 >= 'A' && c1 <= 'Z')
-        c1 += 32;
-      if (c1 != c2) {
-        match = false;
-        break;
-      }
-    }
-    if (match)
-      return true;
-  }
-  return false;
-}
-
-// Helper to check if element name is a block-level element (case-insensitive)
-static bool isBlockElement(const String& name) {
-  if (name.length() == 0)
-    return false;
-
-  const char* blockElements[] = {"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br"};
-  for (size_t i = 0; i < sizeof(blockElements) / sizeof(blockElements[0]); i++) {
-    const char* blockElem = blockElements[i];
-    size_t blockLen = strlen(blockElem);
-    if (name.length() != blockLen)
-      continue;
-
-    bool match = true;
-    for (size_t j = 0; j < blockLen; j++) {
-      char c1 = name.charAt(j);
-      char c2 = blockElem[j];
-      if (c1 >= 'A' && c1 <= 'Z')
-        c1 += 32;
-      if (c1 != c2) {
-        match = false;
-        break;
-      }
-    }
-    if (match)
-      return true;
-  }
-  return false;
-}
-
-bool EpubWordProvider::skipElement(const String& elementName, bool forward) {
-  if (!parser_) {
-    return false;
-  }
-
-  int depth = 1;
-  while (depth > 0) {
-    bool readSuccess = forward ? parser_->read() : parser_->readBackward();
-    if (!readSuccess) {
-      return false;  // Reached end/beginning of document
-    }
-
-    SimpleXmlParser::NodeType innerType = parser_->getNodeType();
-
-    // When going forward: Element increases depth, EndElement decreases
-    // When going backward: EndElement increases depth, Element decreases
-    SimpleXmlParser::NodeType increaseType = forward ? SimpleXmlParser::Element : SimpleXmlParser::EndElement;
-    SimpleXmlParser::NodeType decreaseType = forward ? SimpleXmlParser::EndElement : SimpleXmlParser::Element;
-
-    if (innerType == increaseType) {
-      String innerName = parser_->getName();
-      if (equalsIgnoreCase(innerName, elementName.c_str()) && !parser_->isEmptyElement()) {
-        depth++;
-      }
-    } else if (innerType == decreaseType) {
-      String innerName = parser_->getName();
-      if (equalsIgnoreCase(innerName, elementName.c_str())) {
-        depth--;
-      }
-    }
-  }
-  return true;
-}
-
-void EpubWordProvider::skipToNextContent() {
-  // Skip ahead through whitespace and non-content elements to position
-  // the cursor at the next actual content (or end of file).
-  // This ensures hasNextWord() returns false when there's no more content.
-  while (true) {
-    SimpleXmlParser::NodeType nextType = parser_->getNodeType();
-    if (nextType == SimpleXmlParser::None || nextType == SimpleXmlParser::EndOfFile) {
-      break;  // End of document
-    }
-    if (nextType == SimpleXmlParser::Text) {
-      // Found text - check if it has actual content (not just whitespace)
-      if (parser_->hasMoreTextChars()) {
-        char peek = parser_->peekTextNodeChar();
-        // If there's non-whitespace content, stop here
-        if (peek != ' ' && peek != '\n' && peek != '\t' && peek != '\r') {
-          break;
-        }
-      }
-    }
-    if (nextType == SimpleXmlParser::Element) {
-      String nextName = parser_->getName();
-      // If it's a block element or content element, stop here
-      if (isBlockElement(nextName) || !isNonContentElement(nextName)) {
-        break;
-      }
-    }
-    // Keep scanning
-    if (!parser_->read()) {
-      break;
-    }
-  }
-}
+#include <SD.h>
 
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     : bufSize_(bufSize), fileSize_(0), currentChapter_(0) {
@@ -163,35 +21,29 @@ EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     isEpub_ = false;
     xhtmlPath_ = pathStr;
 
-    // Open the XHTML file with SimpleXmlParser for buffered reading
-    parser_ = new SimpleXmlParser();
-    if (!parser_->open(xhtmlPath_.c_str())) {
-      delete parser_;
-      parser_ = nullptr;
+    // Convert the XHTML file into a text file for the FileWordProvider
+    String txtPath;
+    if (!convertXhtmlToTxt(xhtmlPath_, txtPath)) {
       return;
     }
 
-    // Get file size for percentage calculation
-    fileSize_ = parser_->getFileSize();
-
-    // Position parser at first node for reading
-    parser_->read();
-
-    // Find the position of the first actual content by reading the first word
-    // Save position before first word, then reset
-    size_t startPos = parser_->getFilePosition();
-    String firstWord = getNextWord();
-    if (firstWord.length() > 0) {
-      // The position before we read the first word is the first content position
-      firstContentPos_ = startPos;
-    } else {
-      firstContentPos_ = 0;
+    // Create the underlying FileWordProvider and validate it
+    fileProvider_ = new FileWordProvider(txtPath.c_str(), bufSize_);
+    if (!fileProvider_ || !fileProvider_->isValid()) {
+      if (fileProvider_) {
+        delete fileProvider_;
+        fileProvider_ = nullptr;
+      }
+      return;
     }
-    // Reset to beginning
-    parser_->seekToFilePosition(0);
-    parser_->read();
-    prevFilePos_ = parser_->getFilePosition();
 
+    // Cache sizes and initialize position
+    File f = SD.open(txtPath.c_str());
+    if (f) {
+      fileSize_ = f.size();
+      f.close();
+    }
+    currentIndex_ = 0;
     valid_ = true;
   } else {
     // EPUB file - create and keep EpubReader for chapter navigation
@@ -222,6 +74,293 @@ EpubWordProvider::~EpubWordProvider() {
   if (epubReader_) {
     delete epubReader_;
   }
+  if (fileProvider_) {
+    delete fileProvider_;
+    fileProvider_ = nullptr;
+  }
+}
+
+bool EpubWordProvider::isBlockElement(const String& name) {
+  // List of elements we want to treat as paragraph/line-break boundaries.
+  // Narrowed to elements that actually cause visual line breaks in typical HTML.
+  if (name == "p" || name == "div" || name == "h1" || name == "h2" || name == "h3" || name == "h4" || name == "h5" ||
+      name == "h6" || name == "blockquote" || name == "li" || name == "section" || name == "article" ||
+      name == "header" || name == "footer" || name == "nav") {
+    return true;
+  }
+  return false;
+}
+
+bool EpubWordProvider::isSkippedElement(const String& name) {
+  // Elements whose content should be skipped entirely
+  return name == "head" || name == "title" || name == "style" || name == "script";
+}
+
+bool EpubWordProvider::isHeaderElement(const String& name) {
+  // Header elements that should have newlines after them
+  return name == "h1" || name == "h2" || name == "h3" || name == "h4" || name == "h5" || name == "h6";
+}
+
+bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPath) {
+  if (srcPath.isEmpty())
+    return false;
+
+  // Create output path by replacing extension with .txt
+  String dest = srcPath;
+  int lastDot = dest.lastIndexOf('.');
+  if (lastDot >= 0) {
+    dest = dest.substring(0, lastDot);
+  }
+  dest += ".txt";
+
+  // Open input and output files
+  SimpleXmlParser parser;
+  if (!parser.open(srcPath.c_str()))
+    return false;
+
+  File out = SD.open(dest.c_str(), FILE_WRITE);
+  if (!out) {
+    parser.close();
+    return false;
+  }
+
+  // Perform the conversion using common logic
+  performXhtmlToTxtConversion(parser, out);
+
+  // Cleanup and close
+  parser.close();
+  out.close();
+  outTxtPath = dest;
+  return true;
+}
+
+void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File& out) {
+  // State tracking
+  String writeBuffer;
+  const size_t FLUSH_THRESH = 2048;
+  bool lastWasNewline = false;
+  bool trimNextText = false;
+  std::vector<String> elementStack;
+
+  int nodeCount = 0;
+  int textNodeCount = 0;
+  int elementCount = 0;
+
+  // Helper lambda to trim trailing whitespace from buffer
+  auto trimTrailingWhitespace = [&]() {
+    while (writeBuffer.length() > 0) {
+      char lastChar = writeBuffer.charAt(writeBuffer.length() - 1);
+      if (lastChar == ' ' || lastChar == '\n' || lastChar == '\r' || lastChar == '\t') {
+        writeBuffer = writeBuffer.substring(0, (int)writeBuffer.length() - 1);
+      } else {
+        break;
+      }
+    }
+  };
+
+  // Helper lambda to add newline (always after trimming trailing whitespace)
+  auto addNewline = [&]() {
+    writeBuffer += "\n";
+    lastWasNewline = true;
+    trimNextText = true;
+  };
+
+  // Helper lambda to flush buffer to disk
+  auto flushBuffer = [&]() {
+    if (writeBuffer.length() > 0) {
+      out.print(writeBuffer);
+      writeBuffer = "";
+    }
+  };
+
+  // Helper lambda to check if we're inside any skipped element
+  auto insideSkippedElement = [&]() {
+    for (const auto& elem : elementStack) {
+      if (isSkippedElement(elem)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Parse and convert XHTML to plain text
+  while (parser.read()) {
+    nodeCount++;
+    auto nodeType = parser.getNodeType();
+
+    if (nodeType == SimpleXmlParser::Text) {
+      textNodeCount++;
+      // Use element stack instead of parser.getName() for streaming compatibility
+      if (insideSkippedElement()) {
+        continue;
+      }
+
+      // Extract and normalize text content
+      String rawText;
+      bool hasText = parser.hasMoreTextChars();
+      while (parser.hasMoreTextChars()) {
+        char c = parser.readTextNodeCharForward();
+        if (c == '\r')
+          continue;
+        if (c == '\t')
+          c = ' ';
+        rawText += c;
+      }
+
+      // Collapse consecutive whitespace into single spaces
+      String normalized;
+      bool lastWasSpace = false;
+      for (size_t i = 0; i < (size_t)rawText.length(); ++i) {
+        char c = rawText.charAt(i);
+        if (c == ' ' || c == '\n') {
+          if (!lastWasSpace) {
+            normalized += ' ';
+            lastWasSpace = true;
+          }
+        } else {
+          normalized += c;
+          lastWasSpace = false;
+        }
+      }
+
+      // Trim leading whitespace if we're starting a new block
+      if (trimNextText && !normalized.isEmpty()) {
+        size_t firstNonWs = 0;
+        while (firstNonWs < (size_t)normalized.length() &&
+               (normalized.charAt(firstNonWs) == ' ' || normalized.charAt(firstNonWs) == '\n'))
+          firstNonWs++;
+        if (firstNonWs > 0) {
+          normalized = normalized.substring((int)firstNonWs);
+        }
+        trimNextText = false;
+      }
+
+      // Append to buffer
+      if (!normalized.isEmpty()) {
+        writeBuffer += normalized;
+        lastWasNewline = false;
+      }
+
+      // Periodic flush to avoid excessive memory use
+      if (writeBuffer.length() > FLUSH_THRESH) {
+        flushBuffer();
+      }
+
+    } else if (nodeType == SimpleXmlParser::Element) {
+      elementCount++;
+      String name = parser.getName();
+
+      // Only push non-empty elements to the stack
+      // Self-closing elements (like <br/>, <meta/>, <link/>) don't need to be tracked
+      if (!parser.isEmptyElement()) {
+        elementStack.push_back(name);
+      }
+
+      // Only add newlines for self-closing line break elements (br, hr)
+      // Block elements get their newline when they close (in EndElement)
+      bool isLineBreak = parser.isEmptyElement() && (name == "br" || name == "hr");
+
+      if (isLineBreak) {
+        trimTrailingWhitespace();
+        addNewline();
+      }
+
+    } else if (nodeType == SimpleXmlParser::EndElement) {
+      String name = parser.getName();
+
+      if (isBlockElement(name) || isHeaderElement(name)) {
+        trimTrailingWhitespace();
+        addNewline();
+      }
+
+      // Pop element from stack
+      if (!elementStack.empty()) {
+        elementStack.pop_back();
+      }
+    }
+  }
+
+  // Final flush
+  flushBuffer();
+}
+
+// Context for true streaming: EPUB -> Parser -> TXT
+struct TrueStreamingContext {
+  epub_stream_context* epubStream;
+};
+
+// Callback for SimpleXmlParser to pull data from EPUB stream
+static int parser_stream_callback(char* buffer, size_t maxSize, void* userData) {
+  TrueStreamingContext* ctx = (TrueStreamingContext*)userData;
+  if (!ctx || !ctx->epubStream) {
+    return -1;
+  }
+
+  // Pull next chunk from EPUB decompressor
+  int bytesRead = epub_read_chunk(ctx->epubStream, buffer, maxSize);
+  return bytesRead;
+}
+
+bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String& outTxtPath) {
+  if (!epubReader_) {
+    return false;
+  }
+
+  // Compute output path
+  String dest = epubReader_->getExtractedPath(epubFilename);
+  int lastDot = dest.lastIndexOf('.');
+  if (lastDot >= 0) {
+    dest = dest.substring(0, lastDot);
+  }
+  dest += ".txt";
+
+  // Start pull-based streaming from EPUB
+  unsigned long startMs = millis();
+  epub_stream_context* epubStream = epubReader_->startStreaming(epubFilename, 8192);
+  if (!epubStream) {
+    Serial.println("ERROR: Failed to start EPUB streaming");
+    return false;
+  }
+
+  // Set up context for parser callback
+  TrueStreamingContext streamCtx;
+  streamCtx.epubStream = epubStream;
+
+  // Open parser in streaming mode
+  SimpleXmlParser parser;
+  if (!parser.openFromStream(parser_stream_callback, &streamCtx)) {
+    epub_end_streaming(epubStream);
+    Serial.println("ERROR: Failed to open parser in streaming mode");
+    return false;
+  }
+
+  // Remove existing file to ensure clean write
+  if (SD.exists(dest.c_str())) {
+    SD.remove(dest.c_str());
+  }
+
+  File out = SD.open(dest.c_str(), FILE_WRITE);
+  if (!out) {
+    Serial.println("ERROR: Failed to open output TXT file for writing");
+    parser.close();
+    epub_end_streaming(epubStream);
+    return false;
+  }
+
+  // Perform the conversion using common logic
+  // Parser pulls data from EPUB stream as needed
+  performXhtmlToTxtConversion(parser, out);
+
+  // Check how much was written
+  size_t bytesWritten = out.size();
+
+  parser.close();
+  epub_end_streaming(epubStream);
+  out.close();
+  unsigned long elapsedMs = millis() - startMs;
+  Serial.printf("Converted XHTML to TXT (streamed): %s — %lu ms\n", dest.c_str(), elapsedMs);
+  outTxtPath = dest;
+  return true;
 }
 
 bool EpubWordProvider::openChapter(int chapterIndex) {
@@ -248,12 +387,6 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
   }
   String fullHref = baseDir + spineItem->href;
 
-  // Get the XHTML file (will extract if needed)
-  String newXhtmlPath = epubReader_->getFile(fullHref.c_str());
-  if (newXhtmlPath.isEmpty()) {
-    return false;
-  }
-
   // Close existing parser if any
   if (parser_) {
     parser_->close();
@@ -261,44 +394,54 @@ bool EpubWordProvider::openChapter(int chapterIndex) {
     parser_ = nullptr;
   }
 
-  // Open the new XHTML file
-  parser_ = new SimpleXmlParser();
-  if (!parser_->open(newXhtmlPath.c_str())) {
-    delete parser_;
-    parser_ = nullptr;
+  // Convert XHTML to text file using selected method
+  String txtPath;
+  if (useStreamingConversion_) {
+    // Stream XHTML from EPUB directly to memory and convert (no intermediate XHTML file)
+    if (!convertXhtmlStreamToTxt(fullHref.c_str(), txtPath)) {
+      return false;
+    }
+  } else {
+    // Extract XHTML file first, then convert from file
+    String xhtmlPath = epubReader_->getFile(fullHref.c_str());
+    if (xhtmlPath.isEmpty()) {
+      return false;
+    }
+    if (!convertXhtmlToTxt(xhtmlPath, txtPath)) {
+      return false;
+    }
+  }
+
+  String newXhtmlPath = fullHref;  // Keep for tracking
+
+  // Delete any previous file provider and create new one for this chapter
+  if (fileProvider_) {
+    delete fileProvider_;
+    fileProvider_ = nullptr;
+  }
+  fileProvider_ = new FileWordProvider(txtPath.c_str(), bufSize_);
+  if (!fileProvider_ || !fileProvider_->isValid()) {
+    if (fileProvider_) {
+      delete fileProvider_;
+      fileProvider_ = nullptr;
+    }
     return false;
   }
 
   xhtmlPath_ = newXhtmlPath;
   currentChapter_ = chapterIndex;
-  fileSize_ = parser_->getFileSize();
+  // Cache file size
+  File f = SD.open(txtPath.c_str());
+  if (f) {
+    fileSize_ = f.size();
+    f.close();
+  }
 
   // Cache the chapter name from TOC
   currentChapterName_ = epubReader_->getChapterNameForSpine(chapterIndex);
 
-  // Get CSS parser for style lookups
-  cssParser_ = epubReader_->getCssParser();
-
-  // Reset style state for new chapter
-  currentStyle_.reset();
-
-  // Position parser at first node for reading
-  parser_->read();
-
-  // Find the position of the first actual content by reading the first word
-  // Save position before first word, then reset
-  size_t startPos = parser_->getFilePosition();
-  String firstWord = getNextWord();
-  if (firstWord.length() > 0) {
-    // The position before we read the first word is the first content position
-    firstContentPos_ = startPos;
-  } else {
-    firstContentPos_ = 0;
-  }
-  // Reset to beginning of chapter
-  parser_->seekToFilePosition(0);
-  parser_->read();
-  prevFilePos_ = parser_->getFilePosition();
+  // Initialize index to start of chapter; do not parse nodes yet
+  currentIndex_ = 0;
 
   return true;
 }
@@ -330,536 +473,109 @@ bool EpubWordProvider::setChapter(int chapterIndex) {
 }
 
 bool EpubWordProvider::hasNextWord() {
-  if (!parser_) {
-    return false;
-  }
-  // Check if we have more content to read
-  return parser_->getFilePosition() < fileSize_;
-}
-
-bool EpubWordProvider::hasPrevWord() {
-  if (!parser_) {
-    return false;
-  }
-  // Check if we're past the first content position in this chapter
-  return parser_->getFilePosition() > firstContentPos_;
-}
-
-String EpubWordProvider::getNextWord() {
-  if (!parser_) {
-    return String("");
-  }
-
-  // Save position for ungetWord at start
-  prevFilePos_ = parser_->getFilePosition();
-
-  // Skip to next text content
-  while (true) {
-    SimpleXmlParser::NodeType nodeType = parser_->getNodeType();
-
-    // If we don't have a current node (e.g., after seekToFilePosition), read one
-    if (nodeType == SimpleXmlParser::None || nodeType == SimpleXmlParser::EndOfFile) {
-      if (!parser_->read()) {
-        return String("");  // End of document
-      }
-      continue;  // Loop to check the newly read node
-    }
-
-    if (nodeType == SimpleXmlParser::Text) {
-      // We're in a text node, try to read a character
-      if (parser_->hasMoreTextChars()) {
-        char c = parser_->readTextNodeCharForward();
-
-        // Handle spaces
-        if (c == ' ') {
-          String token;
-          token += c;
-          // Collect consecutive spaces (but don't cross into next node)
-          while (parser_->hasMoreTextChars()) {
-            char next = parser_->peekTextNodeChar();
-            if (next != ' ')
-              break;
-            token += parser_->readTextNodeCharForward();
-          }
-          return token;
-        }
-        // Skip carriage return
-        else if (c == '\r') {
-          continue;  // Loop again
-        }
-        // Handle newline and tab
-        else if (c == '\n' || c == '\t') {
-          return String(c);
-        }
-        // Handle regular word characters
-        else {
-          String token;
-          token += c;
-          // Collect word characters, crossing inline element boundaries
-          while (true) {
-            // First, consume all word chars in current text node
-            while (parser_->hasMoreTextChars()) {
-              char next = parser_->peekTextNodeChar();
-              if (next == '\0' || next == ' ' || next == '\n' || next == '\t' || next == '\r')
-                break;
-              token += parser_->readTextNodeCharForward();
-            }
-
-            // If we still have chars in this text node, we hit a delimiter - done
-            if (parser_->hasMoreTextChars()) {
-              break;
-            }
-
-            // Text node exhausted - check if next node continues the word
-            if (!parser_->read()) {
-              break;  // End of document
-            }
-
-            SimpleXmlParser::NodeType nextType = parser_->getNodeType();
-
-            // If next is text, check if it starts with word char
-            if (nextType == SimpleXmlParser::Text) {
-              if (parser_->hasMoreTextChars()) {
-                char peek = parser_->peekTextNodeChar();
-                if (peek != '\0' && peek != ' ' && peek != '\n' && peek != '\t' && peek != '\r') {
-                  // Continue building word from this text node
-                  continue;
-                }
-              }
-              // Text starts with delimiter or is empty - done with word
-              break;
-            }
-            // Skip inline elements (like <span>) and continue looking for text
-            else if (nextType == SimpleXmlParser::Element) {
-              if (!isBlockElement(parser_->getName())) {
-                // Inline element - skip it and continue
-                continue;
-              }
-              // Block element - done with word
-              break;
-            }
-            // Skip inline end elements (like </span>) and continue
-            else if (nextType == SimpleXmlParser::EndElement) {
-              if (!isBlockElement(parser_->getName())) {
-                // Inline end element - skip it and continue
-                continue;
-              }
-              // Block end element - done with word
-              break;
-            } else {
-              // Other node type - done with word
-              break;
-            }
-          }
-          return token;
-        }
-      } else {
-        // No more chars in current text node, move to next node
-        if (!parser_->read()) {
-          return String("");  // End of document
-        }
-        // Continue loop with new node
-      }
-    } else if (nodeType == SimpleXmlParser::EndElement) {
-      // Check if this is a block element end tag
-      String elementName = parser_->getName();
-
-      if (isBlockElement(elementName)) {
-        // Move past this end element first
-        parser_->read();
-        // Skip ahead to find the next content (or reach end of file)
-        // This ensures hasNextWord() returns false when there's no more content
-        skipToNextContent();
-        return String('\n');
-      }
-      // Inline end tag (like </span>) - just move to next node
-      if (!parser_->read()) {
-        return String("");  // End of document
-      }
-    } else if (nodeType == SimpleXmlParser::Element) {
-      String elementName = parser_->getName();
-
-      // Skip non-content elements entirely (head, style, script)
-      if (isNonContentElement(elementName)) {
-        if (!skipElement(elementName, true) || !parser_->read()) {
-          return String("");  // End of document
-        }
-        continue;
-      }
-
-      // Update style for this element (reads class attribute)
-      updateStyleForElement();
-
-      if (isBlockElement(elementName)) {
-        // Check if this is a self-closing element (like <br/>)
-        if (parser_->isEmptyElement()) {
-          // Move past this element first
-          parser_->read();
-          // Skip ahead to find the next content (or reach end of file)
-          skipToNextContent();
-          return String('\n');
-        }
-      }
-      // Move past this element (opening tags don't produce tokens)
-      if (!parser_->read()) {
-        return String("");  // End of document
-      }
-    } else {
-      // Other node types (comments, processing instructions, etc.)
-      if (!parser_->read()) {
-        return String("");  // End of document
-      }
-    }
-  }
-}
-
-String EpubWordProvider::getPrevWord() {
-  if (!parser_) {
-    return String("");
-  }
-
-  // Save position for ungetWord at start
-  prevFilePos_ = parser_->getFilePosition();
-
-  // Navigate backward through nodes
-  while (true) {
-    SimpleXmlParser::NodeType nodeType = parser_->getNodeType();
-
-    // If we don't have a current node (e.g., after seekToFilePosition), read backward
-    if (nodeType == SimpleXmlParser::None || nodeType == SimpleXmlParser::EndOfFile) {
-      if (!parser_->readBackward()) {
-        return String("");  // Beginning of document
-      }
-      continue;  // Loop to check the newly read node
-    }
-
-    if (nodeType == SimpleXmlParser::Text) {
-      // We're in a text node, try to read a character backward
-      if (parser_->hasMoreTextCharsBackward()) {
-        char c = parser_->readPrevTextNodeChar();
-
-        // Handle spaces
-        if (c == ' ') {
-          String token;
-          token += c;
-          // Collect consecutive spaces backward (within this text node only)
-          while (parser_->hasMoreTextCharsBackward()) {
-            char prev = parser_->peekPrevTextNodeChar();
-            if (prev != ' ')
-              break;
-            token += parser_->readPrevTextNodeChar();
-          }
-          return token;
-        }
-        // Skip carriage return
-        else if (c == '\r') {
-          continue;
-        }
-        // Handle newline and tab
-        else if (c == '\n' || c == '\t') {
-          return String(c);
-        }
-        // Handle regular word characters - collect backward then reverse
-        else {
-          String rev;
-          rev += c;
-          // Collect word characters backward, crossing inline element boundaries
-          while (true) {
-            // First, consume all word chars in current text node (backward)
-            while (parser_->hasMoreTextCharsBackward()) {
-              char prev = parser_->peekPrevTextNodeChar();
-              if (prev == '\0' || prev == ' ' || prev == '\n' || prev == '\t' || prev == '\r')
-                break;
-              rev += parser_->readPrevTextNodeChar();
-            }
-
-            // If we still have chars backward in this text node, we hit a delimiter - done
-            if (parser_->hasMoreTextCharsBackward()) {
-              break;
-            }
-
-            // Text node exhausted backward - check if previous node continues the word
-            if (!parser_->readBackward()) {
-              break;  // Beginning of document
-            }
-
-            SimpleXmlParser::NodeType prevType = parser_->getNodeType();
-
-            // If previous is text, check if it ends with word char
-            if (prevType == SimpleXmlParser::Text) {
-              if (parser_->hasMoreTextCharsBackward()) {
-                char peek = parser_->peekPrevTextNodeChar();
-                if (peek != '\0' && peek != ' ' && peek != '\n' && peek != '\t' && peek != '\r') {
-                  // Continue building word from this text node
-                  continue;
-                }
-              }
-              // Text ends with delimiter or is empty - done with word
-              break;
-            }
-            // Skip inline elements (like <span>) and continue looking for text
-            else if (prevType == SimpleXmlParser::Element) {
-              if (!isBlockElement(parser_->getName())) {
-                // Inline element - skip it and continue
-                continue;
-              }
-              // Block element - done with word
-              break;
-            }
-            // Skip inline end elements (like </span>) and continue
-            else if (prevType == SimpleXmlParser::EndElement) {
-              if (!isBlockElement(parser_->getName())) {
-                // Inline end element - skip it and continue
-                continue;
-              }
-              // Block end element - done with word
-              break;
-            } else {
-              // Other node type - done with word
-              break;
-            }
-          }
-          // Reverse to get correct order
-          String token;
-          for (int i = rev.length() - 1; i >= 0; --i) {
-            token += rev.charAt(i);
-          }
-          return token;
-        }
-      }
-      // No more chars in current text node, move to previous node
-      if (!parser_->readBackward()) {
-        return String("");  // Beginning of document
-      }
-    } else if (nodeType == SimpleXmlParser::EndElement) {
-      // Block element end tag - return newline
-      String elementName = parser_->getName();
-
-      // Skip non-content elements entirely (head, style, script) when reading backward
-      if (isNonContentElement(elementName)) {
-        if (!skipElement(elementName, false) || !parser_->readBackward()) {
-          return String("");  // Beginning of document
-        }
-        continue;
-      }
-
-      if (isBlockElement(elementName)) {
-        // Save position of this element for ungetWord before advancing
-        prevFilePos_ = parser_->getElementEndPos();
-        // Move to previous node, then return newline
-        parser_->readBackward();
-        return String('\n');
-      }
-      // Inline end element - just move to previous node
-      if (!parser_->readBackward()) {
-        return String("");  // Beginning of document
-      }
-    } else if (nodeType == SimpleXmlParser::Element) {
-      String elementName = parser_->getName();
-
-      if (isBlockElement(elementName)) {
-        // Check if this is a self-closing element (like <br/>)
-        if (parser_->isEmptyElement()) {
-          // Save position of this element for ungetWord before advancing
-          prevFilePos_ = parser_->getElementEndPos();
-          // Move past this element backward, then return newline
-          parser_->readBackward();
-          return String('\n');
-        }
-      }
-      // Move to previous node (opening tags don't produce tokens when going backward)
-      if (!parser_->readBackward()) {
-        return String("");  // Beginning of document
-      }
-    } else {
-      // Other node types (comments, processing instructions, etc.)
-      if (!parser_->readBackward()) {
-        return String("");  // Beginning of document
-      }
-    }
-  }
-}
-
-float EpubWordProvider::getPercentage() {
-  if (!parser_)
-    return 1.0f;
-
-  // For EPUBs, calculate book-wide percentage
-  if (isEpub_ && epubReader_) {
-    size_t totalSize = epubReader_->getTotalBookSize();
-    if (totalSize == 0)
-      return 1.0f;
-
-    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
-    size_t positionInChapter = parser_->getFilePosition();
-    size_t absolutePosition = chapterOffset + positionInChapter;
-
-    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
-  }
-
-  // For single XHTML files, use file-based percentage
-  if (fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(parser_->getFilePosition()) / static_cast<float>(fileSize_);
-}
-
-float EpubWordProvider::getPercentage(int index) {
-  // For EPUBs, calculate book-wide percentage for a given position in current chapter
-  if (isEpub_ && epubReader_) {
-    size_t totalSize = epubReader_->getTotalBookSize();
-    if (totalSize == 0)
-      return 1.0f;
-
-    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
-    size_t absolutePosition = chapterOffset + index;
-
-    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
-  }
-
-  // For single XHTML files
-  if (fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(index) / static_cast<float>(fileSize_);
-}
-
-float EpubWordProvider::getChapterPercentage() {
-  if (!parser_ || fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(parser_->getFilePosition()) / static_cast<float>(fileSize_);
-}
-
-float EpubWordProvider::getChapterPercentage(int index) {
-  if (fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(index) / static_cast<float>(fileSize_);
-}
-
-int EpubWordProvider::getCurrentIndex() {
-  if (!parser_) {
-    return 0;
-  }
-  return parser_->getFilePosition();
-}
-
-char EpubWordProvider::peekChar(int offset) {
-  return '\0';  // Not implemented
-}
-
-int EpubWordProvider::consumeChars(int n) {
-  if (!parser_ || n <= 0) {
-    return 0;
-  }
-
-  int consumed = 0;
-
-  while (consumed < n) {
-    SimpleXmlParser::NodeType nodeType = parser_->getNodeType();
-
-    // If we don't have a current node, read one
-    if (nodeType == SimpleXmlParser::None || nodeType == SimpleXmlParser::EndOfFile) {
-      if (!parser_->read()) {
-        break;  // End of document
-      }
-      continue;
-    }
-
-    if (nodeType == SimpleXmlParser::Text) {
-      // Consume characters from this text node
-      while (consumed < n && parser_->hasMoreTextChars()) {
-        char c = parser_->readTextNodeCharForward();
-        // Skip carriage returns, they don't count as consumed characters
-        if (c != '\r') {
-          consumed++;
-        }
-      }
-
-      // If text node exhausted, move to next node
-      if (!parser_->hasMoreTextChars()) {
-        if (!parser_->read()) {
-          break;  // End of document
-        }
-      }
-    } else if (nodeType == SimpleXmlParser::Element || nodeType == SimpleXmlParser::EndElement) {
-      // Skip inline elements, stop at block elements
-      String elementName = parser_->getName();
-      if (isBlockElement(elementName)) {
-        break;  // Stop at block elements
-      }
-      // Skip inline element
-      if (!parser_->read()) {
-        break;
-      }
-    } else {
-      // Skip other node types
-      if (!parser_->read()) {
-        break;
-      }
-    }
-  }
-
-  return consumed;
-}
-
-bool EpubWordProvider::isInsideWord() {
-  if (!parser_) {
-    return false;
-  }
-
-  // For now, return false since backward scanning is not implemented
-  // This would require tracking previous character which is complex
+  if (fileProvider_)
+    return fileProvider_->hasNextWord();
   return false;
 }
 
-void EpubWordProvider::ungetWord() {
-  if (!parser_) {
-    return;
+bool EpubWordProvider::hasPrevWord() {
+  if (fileProvider_)
+    return fileProvider_->hasPrevWord();
+  return false;
+}
+
+String EpubWordProvider::getNextWord() {
+  if (!fileProvider_)
+    return String("");
+  return fileProvider_->getNextWord();
+}
+
+String EpubWordProvider::getPrevWord() {
+  if (!fileProvider_)
+    return String("");
+  return fileProvider_->getPrevWord();
+}
+
+float EpubWordProvider::getPercentage() {
+  if (!fileProvider_)
+    return 1.0f;
+  // For EPUBs, calculate book-wide percentage using chapter offset
+  if (isEpub_ && epubReader_) {
+    size_t totalSize = epubReader_->getTotalBookSize();
+    if (totalSize == 0)
+      return 1.0f;
+    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
+    size_t positionInChapter = static_cast<size_t>(fileProvider_->getCurrentIndex());
+    size_t absolutePosition = chapterOffset + positionInChapter;
+    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
   }
-  parser_->seekToFilePosition(prevFilePos_);
+  // Non-EPUB: delegate to file provider percentage
+  return fileProvider_->getPercentage();
+}
+
+float EpubWordProvider::getPercentage(int index) {
+  if (!fileProvider_)
+    return 1.0f;
+  if (isEpub_ && epubReader_) {
+    size_t totalSize = epubReader_->getTotalBookSize();
+    if (totalSize == 0)
+      return 1.0f;
+    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
+    size_t absolutePosition = chapterOffset + static_cast<size_t>(index);
+    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
+  }
+  return fileProvider_->getPercentage(index);
+}
+
+float EpubWordProvider::getChapterPercentage() {
+  if (!fileProvider_)
+    return 1.0f;
+  return fileProvider_->getPercentage();
+}
+
+float EpubWordProvider::getChapterPercentage(int index) {
+  if (!fileProvider_)
+    return 1.0f;
+  return fileProvider_->getPercentage(index);
+}
+
+int EpubWordProvider::getCurrentIndex() {
+  if (!fileProvider_)
+    return 0;
+  return fileProvider_->getCurrentIndex();
+}
+
+char EpubWordProvider::peekChar(int offset) {
+  if (!fileProvider_)
+    return '\0';
+  return fileProvider_->peekChar(offset);
+}
+
+int EpubWordProvider::consumeChars(int n) {
+  if (!fileProvider_)
+    return 0;
+  return fileProvider_->consumeChars(n);
+}
+
+bool EpubWordProvider::isInsideWord() {
+  if (!fileProvider_)
+    return false;
+  return fileProvider_->isInsideWord();
+}
+
+void EpubWordProvider::ungetWord() {
+  if (!fileProvider_)
+    return;
+  fileProvider_->ungetWord();
 }
 
 void EpubWordProvider::setPosition(int index) {
-  if (!parser_) {
+  if (!fileProvider_)
     return;
-  }
-
-  size_t filePos;
-  if (index < 0) {
-    filePos = 0;
-  } else if (static_cast<size_t>(index) > fileSize_) {
-    filePos = fileSize_;
-  } else {
-    filePos = static_cast<size_t>(index);
-  }
-
-  parser_->seekToFilePosition(filePos);
-  prevFilePos_ = parser_->getFilePosition();
-
-  updateStyleForElement();
+  fileProvider_->setPosition(index);
 }
 
 void EpubWordProvider::reset() {
-  // Reset parser to beginning
-  if (parser_) {
-    parser_->seekToFilePosition(0);
-    prevFilePos_ = parser_->getFilePosition();
-  }
-  // Reset style state
-  currentStyle_.reset();
-}
-
-void EpubWordProvider::updateStyleForElement() {
-  if (!cssParser_ || !parser_) {
-    return;
-  }
-
-  // Get class attribute from current element
-  String classAttr = parser_->getAttribute("class");
-  if (classAttr.isEmpty()) {
-    // No class attribute, reset to default style
-    currentStyle_.reset();
-    return;
-  }
-
-  // Get combined style for all classes and set as current
-  currentStyle_ = cssParser_->getCombinedStyle(classAttr);
+  if (fileProvider_)
+    fileProvider_->reset();
 }
