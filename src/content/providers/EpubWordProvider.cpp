@@ -80,6 +80,15 @@ EpubWordProvider::~EpubWordProvider() {
   }
 }
 
+bool EpubWordProvider::createDirRecursive(const String& path) {
+  if (SD.exists(path.c_str())) return true;
+  int slash = path.lastIndexOf('/');
+  if (slash <= 0) return true;  // root or no slash
+  String parent = path.substring(0, slash);
+  if (!createDirRecursive(parent)) return false;
+  return SD.mkdir(path.c_str());
+}
+
 bool EpubWordProvider::isBlockElement(const String& name) {
   // List of elements we want to treat as paragraph/line-break boundaries.
   // Narrowed to elements that actually cause visual line breaks in typical HTML.
@@ -112,6 +121,13 @@ bool EpubWordProvider::convertXhtmlToTxt(const String& srcPath, String& outTxtPa
     dest = dest.substring(0, lastDot);
   }
   dest += ".txt";
+
+  // Create directories if needed
+  int lastSlash = dest.lastIndexOf('/');
+  if (lastSlash > 0) {
+    String dir = dest.substring(0, lastSlash);
+    createDirRecursive(dir);
+  }
 
   // Open input and output files
   SimpleXmlParser parser;
@@ -378,6 +394,13 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
   }
   dest += ".txt";
 
+  // Create directories if needed
+  int lastSlash = dest.lastIndexOf('/');
+  if (lastSlash > 0) {
+    String dir = dest.substring(0, lastSlash);
+    createDirRecursive(dir);
+  }
+
   // Start pull-based streaming from EPUB
   unsigned long startMs = millis();
   epub_stream_context* epubStream = epubReader_->startStreaming(epubFilename, 8192);
@@ -405,7 +428,7 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
 
   File out = SD.open(dest.c_str(), FILE_WRITE);
   if (!out) {
-    Serial.println("ERROR: Failed to open output TXT file for writing");
+    Serial.printf("ERROR: Failed to open output TXT file '%s' for writing\n", dest.c_str());
     parser.close();
     epub_end_streaming(epubStream);
     return false;

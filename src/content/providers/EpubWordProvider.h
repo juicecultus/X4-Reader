@@ -95,6 +95,9 @@ class EpubWordProvider : public WordProvider {
   void writeParagraphStyleToken(String& writeBuffer, const String& pendingParagraphClasses,
                                 bool& paragraphClassesWritten);
 
+  // Helper to create directories recursively for a given path
+  bool createDirRecursive(const String& path);
+
   bool valid_ = false;
   bool isEpub_ = false;                 // True if source is EPUB, false if direct XHTML
   bool useStreamingConversion_ = true;  // True = stream from EPUB to memory, false = extract XHTML file first

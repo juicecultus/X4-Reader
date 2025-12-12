@@ -24,19 +24,19 @@
 #include "test_utils.h"
 
 // Test toggles - set to false to skip specific tests
-#define TEST_EPUB_VALIDITY false
-#define TEST_SPINE_COUNT false
-#define TEST_SPINE_ITEMS false
-#define TEST_CONTENT_OPF_PATH false
-#define TEST_EXTRACT_DIR false
-#define TEST_FILE_EXTRACTION false
-#define TEST_SPINE_ITEM_BOUNDS false
-#define TEST_TOC_CONTENT false
-#define TEST_CHAPTER_NAME_FOR_SPINE false
-#define TEST_SPINE_SIZES false
+#define TEST_EPUB_VALIDITY true
+#define TEST_SPINE_COUNT true
+#define TEST_SPINE_ITEMS true
+#define TEST_CONTENT_OPF_PATH true
+#define TEST_EXTRACT_DIR true
+#define TEST_FILE_EXTRACTION true
+#define TEST_SPINE_ITEM_BOUNDS true
+#define TEST_TOC_CONTENT true
+#define TEST_CHAPTER_NAME_FOR_SPINE true
+#define TEST_SPINE_SIZES true
 #define TEST_CSS_PARSING true
-#define TEST_STREAM_CONVERTER false
-#define TEST_STREAM_RAW_BYTES false
+#define TEST_STREAM_CONVERTER true
+#define TEST_STREAM_RAW_BYTES true
 
 // Test configuration
 namespace EpubReaderTests {

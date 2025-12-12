@@ -52,7 +52,7 @@ namespace TestGlobals {
 #define USE_EPUB_PROVIDER
 // The test repository contains bobiverse one.epub; update the test path to match an existing file.
 // inline const char* g_testFilePath = "resources/books/mabuse.epub";
-inline const char* g_testFilePath = "resources/books/bobiverse one.epub";
+inline const char* g_testFilePath = "resources/books/snow crash.epub";
 // inline const char* g_testFilePath = "resources/books/mabuse.xhtml";
 
 // XHTML test file path
