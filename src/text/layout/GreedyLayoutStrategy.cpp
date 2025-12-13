@@ -24,6 +24,7 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
   const int16_t maxY = config.pageHeight - config.marginBottom;
 
   // Measure space width using renderer
+  renderer.setFontStyle(FontStyle::REGULAR);
   renderer.getTextBounds(" ", 0, 0, nullptr, nullptr, &spaceWidth_, nullptr);
 
   PageLayout result;

@@ -51,10 +51,8 @@ class FileWordProvider : public WordProvider {
   size_t bufStart_ = 0;  // file offset of buf_[0]
   size_t bufLen_ = 0;    // valid bytes in buf_
 
-  // Paragraph alignment caching
-  TextAlign cachedParagraphAlignment_ = TextAlign::Left;
-  size_t cachedParagraphStart_ = SIZE_MAX;  // SIZE_MAX = invalid/not cached
-  size_t cachedParagraphEnd_ = SIZE_MAX;
+  // Current paragraph alignment (computed on position change). 'None' means no alignment.
+  TextAlign currentParagraphAlignment_ = TextAlign::None;
 
   // Current inline font style (updated when parsing [style=...] tokens)
   FontStyle currentInlineStyle_ = FontStyle::REGULAR;
@@ -62,7 +60,8 @@ class FileWordProvider : public WordProvider {
   // Find paragraph boundaries containing the given position
   void findParagraphBoundaries(size_t pos, size_t& outStart, size_t& outEnd);
   // Update the paragraph alignment cache for current position
-  void updateParagraphAlignmentCache();
+  // Compute paragraph alignment for a given position (sets currentParagraphAlignment_)
+  void computeParagraphAlignmentForPosition(size_t pos);
 
   // Parse and skip an ESC token starting at `pos` (forward direction).
   // ESC format: ESC + command byte (2 bytes total, fixed length)
@@ -94,6 +93,10 @@ class FileWordProvider : public WordProvider {
   // Check if we're at the end of an ESC token (at command byte position).
   // Returns true and sets tokenStart if found.
   bool isAtEscTokenEnd(size_t pos, size_t& tokenStart);
+
+  // UTF-8 BOM handling
+  bool hasUtf8BomAtStart();
+  void skipUtf8BomIfPresent();
 
   // Helper method to determine if a character is a word boundary
   bool isWordBoundary(char c);

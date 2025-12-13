@@ -87,7 +87,7 @@ LayoutStrategy::Line LayoutStrategy::getNextLine(WordProvider& provider, TextRen
       HyphenSplit split = {-1, false, false};
 
       // if (allowHyphenation)
-      { split = findBestHyphenSplitForward(currentWord.text, availableWidth, renderer); }
+      { split = findBestHyphenSplitForward(currentWord, availableWidth, renderer); }
       if (split.found) {
         // Successfully found a split position
         String firstPart;
@@ -122,13 +122,6 @@ LayoutStrategy::Line LayoutStrategy::getNextLine(WordProvider& provider, TextRen
       currentWidth += spaceNeeded;
     }
   }
-
-  // // output the words in the line
-  // for (size_t i = 0; i < result.words.size(); i++) {
-  //   Serial.printf(result.words[i].text.c_str());
-  //   Serial.print(";");
-  // }
-  // Serial.println();
 
   return result;
 }
@@ -187,7 +180,7 @@ LayoutStrategy::Line LayoutStrategy::getPrevLine(WordProvider& provider, TextRen
       HyphenSplit split = {-1, false, false};
 
       // if (allowHyphenation)
-      { split = findBestHyphenSplitBackward(currentWord.text, availableWidth, renderer); }
+      { split = findBestHyphenSplitBackward(currentWord, availableWidth, renderer); }
       if (split.found) {
         // Successfully found a split position - add second part (after the split)
         // Take text after the split point
@@ -223,6 +216,7 @@ int LayoutStrategy::getPreviousPageStart(WordProvider& provider, TextRenderer& r
   int savedPosition = provider.getCurrentIndex();
 
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
+  renderer.setFontStyle(FontStyle::REGULAR);
   renderer.getTextBounds(" ", 0, 0, nullptr, nullptr, &spaceWidth_, nullptr);
 
   // Calculate how many lines fit on the screen
@@ -300,12 +294,12 @@ int LayoutStrategy::getPreviousPageStart(WordProvider& provider, TextRenderer& r
   return previousPageStart;
 }
 
-LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitForward(const String& word, int16_t availableWidth,
+LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitForward(const Word& word, int16_t availableWidth,
                                                                        TextRenderer& renderer) {
   // Find the last (rightmost) hyphen position where the first part fits
   std::vector<int> hyphenPositions;
   if (hyphenationStrategy_) {
-    std::string stdWord = word.c_str();
+    std::string stdWord = word.text.c_str();
     hyphenPositions = hyphenationStrategy_->findHyphenPositions(stdWord, 6, 3);
   }
   HyphenSplit result = {-1, false, false};
@@ -319,13 +313,15 @@ LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitForward(const Str
     // For existing hyphens, include the hyphen character
     String candidate;
     if (isAlgorithmic) {
-      candidate = word.substring(0, actualPos) + "-";
+      candidate = word.text.substring(0, actualPos) + "-";
     } else {
-      candidate = word.substring(0, actualPos + 1);
+      candidate = word.text.substring(0, actualPos + 1);
     }
 
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
+    // Apply the font style of the original word to the renderer before measuring
+    renderer.setFontStyle(word.style);
     renderer.getTextBounds(candidate.c_str(), 0, 0, &bx, &by, &bw, &bh);
 
     if (bw <= availableWidth) {
@@ -338,12 +334,12 @@ LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitForward(const Str
   return result;
 }
 
-LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitBackward(const String& word, int16_t availableWidth,
+LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitBackward(const Word& word, int16_t availableWidth,
                                                                         TextRenderer& renderer) {
   // Find the earliest (leftmost) hyphen position where the second part fits
   std::vector<int> hyphenPositions;
   if (hyphenationStrategy_) {
-    std::string stdWord = word.c_str();
+    std::string stdWord = word.text.c_str();
     hyphenPositions = hyphenationStrategy_->findHyphenPositions(stdWord, 6, 3);
   }
   HyphenSplit result = {-1, false, false};
@@ -354,9 +350,11 @@ LayoutStrategy::HyphenSplit LayoutStrategy::findBestHyphenSplitBackward(const St
     int actualPos = isAlgorithmic ? -(pos + 1) : pos;
 
     // For both algorithmic and existing hyphens, take text after the split point
-    String candidate = word.substring(actualPos, word.length());
+    String candidate = word.text.substring(actualPos, word.text.length());
     int16_t bx = 0, by = 0;
     uint16_t bw = 0, bh = 0;
+    // Apply the font style of the original word to the renderer before measuring
+    renderer.setFontStyle(word.style);
     renderer.getTextBounds(candidate.c_str(), 0, 0, &bx, &by, &bw, &bh);
 
     if (bw <= availableWidth) {

@@ -11,6 +11,116 @@
 //                          'X'(bold+italic on), 'x'(bold+italic off)
 static constexpr char ESC_CHAR = '\x1B';
 
+// Helper functions for mapping ESC command chars to alignments / styles
+// Alignment command helpers: we treat uppercase letters as 'start' tokens and lowercase as 'end'
+static bool tryGetAlignmentStart(char cmd, TextAlign* out) {
+  switch (cmd) {
+    case 'L':
+      if (out)
+        *out = TextAlign::Left;
+      return true;
+    case 'R':
+      if (out)
+        *out = TextAlign::Right;
+      return true;
+    case 'C':
+      if (out)
+        *out = TextAlign::Center;
+      return true;
+    case 'J':
+      if (out)
+        *out = TextAlign::Justify;
+      return true;
+  }
+  return false;
+}
+
+static bool tryGetAlignmentEnd(char cmd, TextAlign* out) {
+  switch (cmd) {
+    case 'l':
+      if (out)
+        *out = TextAlign::Left;
+      return true;
+    case 'r':
+      if (out)
+        *out = TextAlign::Right;
+      return true;
+    case 'c':
+      if (out)
+        *out = TextAlign::Center;
+      return true;
+    case 'j':
+      if (out)
+        *out = TextAlign::Justify;
+      return true;
+  }
+  return false;
+}
+
+static bool tryGetStyleForward(char cmd, FontStyle* out) {
+  switch (cmd) {
+    case 'B':
+      if (out)
+        *out = FontStyle::BOLD;
+      return true;
+    case 'b':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'I':
+      if (out)
+        *out = FontStyle::ITALIC;
+      return true;
+    case 'i':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'X':
+      if (out)
+        *out = FontStyle::BOLD_ITALIC;
+      return true;
+    case 'x':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+  }
+  return false;
+}
+
+static bool tryGetStyleBackward(char cmd, FontStyle* out) {
+  switch (cmd) {
+    case 'B':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'b':
+      if (out)
+        *out = FontStyle::BOLD;
+      return true;
+    case 'I':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'i':
+      if (out)
+        *out = FontStyle::ITALIC;
+      return true;
+    case 'X':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'x':
+      if (out)
+        *out = FontStyle::BOLD_ITALIC;
+      return true;
+  }
+  return false;
+}
+
+static bool isEscCommandChar(char cmd) {
+  return tryGetAlignmentStart(cmd, nullptr) || tryGetAlignmentEnd(cmd, nullptr) || tryGetStyleForward(cmd, nullptr);
+}
+
 FileWordProvider::FileWordProvider(const char* path, size_t bufSize) : bufSize_(bufSize) {
   file_ = SD.open(path);
   if (!file_) {
@@ -24,13 +134,10 @@ FileWordProvider::FileWordProvider(const char* path, size_t bufSize) : bufSize_(
   buf_ = (uint8_t*)malloc(bufSize_);
   bufStart_ = 0;
   bufLen_ = 0;
-
-  // Skip UTF-8 BOM if present
-  if (fileSize_ >= 3) {
-    if (ensureBufferForPos(0) && buf_[0] == 0xEF && buf_[1] == 0xBB && buf_[2] == 0xBF) {
-      index_ = 3;  // Skip the 3-byte BOM
-    }
-  }
+  // Skip UTF-8 BOM at start of file if present so it doesn't appear as a word
+  skipUtf8BomIfPresent();
+  // Compute paragraph alignment for initial position
+  computeParagraphAlignmentForPosition(index_);
 }
 
 FileWordProvider::~FileWordProvider() {
@@ -87,65 +194,34 @@ bool FileWordProvider::ensureBufferForPos(size_t pos) {
 size_t FileWordProvider::parseEscTokenAtPos(size_t pos, TextAlign* outAlignment, bool processStyle) {
   if (pos + 1 >= fileSize_)
     return 0;
-
   char c = charAt(pos);
   if (c != ESC_CHAR)
     return 0;
 
   char cmd = charAt(pos + 1);
 
-  // Alignment commands
-  switch (cmd) {
-    case 'L':
-      if (outAlignment)
-        *outAlignment = TextAlign::Left;
-      else if (processStyle)
-        cachedParagraphAlignment_ = TextAlign::Left;
-      return 2;
-    case 'R':
-      if (outAlignment)
-        *outAlignment = TextAlign::Right;
-      else if (processStyle)
-        cachedParagraphAlignment_ = TextAlign::Right;
-      return 2;
-    case 'C':
-      if (outAlignment)
-        *outAlignment = TextAlign::Center;
-      else if (processStyle)
-        cachedParagraphAlignment_ = TextAlign::Center;
-      return 2;
-    case 'J':
-      if (outAlignment)
-        *outAlignment = TextAlign::Justify;
-      else if (processStyle)
-        cachedParagraphAlignment_ = TextAlign::Justify;
-      return 2;
+  TextAlign align;
+  if (tryGetAlignmentStart(cmd, &align)) {
+    if (outAlignment)
+      *outAlignment = align;
+    if (processStyle)
+      currentParagraphAlignment_ = align;
+    return 2;
+  }
+  // Closing paragraph alignment token: treat as an ESC token but it resets alignment
+  if (tryGetAlignmentEnd(cmd, &align)) {
+    if (outAlignment)
+      *outAlignment = TextAlign::None;
+    if (processStyle)
+      currentParagraphAlignment_ = TextAlign::None;
+    return 2;
+  }
 
-    // Style commands
-    case 'B':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::BOLD;
-      return 2;
-    case 'b':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::REGULAR;
-      return 2;
-    case 'I':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::ITALIC;
-      return 2;
-    case 'i':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::REGULAR;
-      return 2;
-    case 'X':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::BOLD_ITALIC;
-      return 2;
-    case 'x':
-      if (processStyle)
-        currentInlineStyle_ = FontStyle::REGULAR;
-      return 2;
+  FontStyle style;
+  if (tryGetStyleForward(cmd, &style)) {
+    if (processStyle)
+      currentInlineStyle_ = style;
+    return 2;
   }
 
   return 0;  // Unknown command
@@ -169,42 +245,21 @@ void FileWordProvider::parseEscTokenBackward(size_t pos) {
 
   char cmd = charAt(pos + 1);
 
-  // Alignment commands - same meaning regardless of direction
-  switch (cmd) {
-    case 'L':
-      cachedParagraphAlignment_ = TextAlign::Left;
-      return;
-    case 'R':
-      cachedParagraphAlignment_ = TextAlign::Right;
-      return;
-    case 'C':
-      cachedParagraphAlignment_ = TextAlign::Center;
-      return;
-    case 'J':
-      cachedParagraphAlignment_ = TextAlign::Justify;
-      return;
+  TextAlign align;
+  // Backward scanning: encountering a lowercase end token means we ENTER a paragraph alignment region
+  if (tryGetAlignmentEnd(cmd, &align)) {
+    currentParagraphAlignment_ = align;
+    return;
+  }
+  // Backward scanning: encountering an uppercase start token means we EXIT an alignment region
+  if (tryGetAlignmentStart(cmd, &align)) {
+    currentParagraphAlignment_ = TextAlign::None;
+    return;
+  }
 
-    // Style commands - INVERTED for backward reading
-    // 'B' (start bold forward) = end bold backward
-    case 'B':
-      currentInlineStyle_ = FontStyle::REGULAR;
-      return;
-    // 'b' (end bold forward) = start bold backward
-    case 'b':
-      currentInlineStyle_ = FontStyle::BOLD;
-      return;
-    case 'I':
-      currentInlineStyle_ = FontStyle::REGULAR;
-      return;
-    case 'i':
-      currentInlineStyle_ = FontStyle::ITALIC;
-      return;
-    case 'X':
-      currentInlineStyle_ = FontStyle::REGULAR;
-      return;
-    case 'x':
-      currentInlineStyle_ = FontStyle::BOLD_ITALIC;
-      return;
+  FontStyle style;
+  if (tryGetStyleBackward(cmd, &style)) {
+    currentInlineStyle_ = style;
   }
 }
 
@@ -219,10 +274,8 @@ bool FileWordProvider::isAtEscTokenEnd(size_t pos, size_t& tokenStart) {
   if (prevChar != ESC_CHAR)
     return false;
 
-  // Verify this is a valid command byte
   char cmd = charAt(pos);
-  if (cmd == 'L' || cmd == 'R' || cmd == 'C' || cmd == 'J' || cmd == 'B' || cmd == 'b' || cmd == 'I' || cmd == 'i' ||
-      cmd == 'X' || cmd == 'x') {
+  if (isEscCommandChar(cmd)) {
     tokenStart = pos - 1;
     return true;
   }
@@ -275,6 +328,10 @@ StyledWord FileWordProvider::getNextWord() {
   else if (c == '\n' || c == '\t') {
     token += c;
     index_++;
+    // Newline resets paragraph alignment
+    if (c == '\n') {
+      currentParagraphAlignment_ = TextAlign::None;
+    }
   }
   // Case 3: Regular character - continue until boundary
   else {
@@ -302,6 +359,13 @@ StyledWord FileWordProvider::getNextWord() {
     }
   }
 
+  // // DEBUG: print returned word with alignment
+  // {
+  //   // Alignment is updated by parseEscTokenAtPos while skipping ESC tokens.
+  //   TextAlign align = getParagraphAlignment();
+  //   printf("getNextWord returning pos=%d token='%s' style=%d align=%d\n", getCurrentIndex(), token.c_str(),
+  //          (int)styleForWord, (int)align);
+  // }
   return StyledWord(token, styleForWord);
 }
 
@@ -322,6 +386,8 @@ StyledWord FileWordProvider::getPrevWord() {
     if (index_ > 0) {
       size_t tokenStart;
       if (isAtEscTokenEnd(index_, tokenStart)) {
+        // Process token backward to update inline styles and paragraph alignment
+        parseEscTokenBackward(tokenStart);
         // We're at command byte, skip back over the whole token
         if (tokenStart == 0) {
           // ESC token starts at position 0, nothing before it
@@ -338,6 +404,8 @@ StyledWord FileWordProvider::getPrevWord() {
       // Check if valid token without modifying state
       size_t tokenLen = checkEscTokenAtPos(index_);
       if (tokenLen > 0) {
+        // Process backward so we update style/alignment context
+        parseEscTokenBackward(index_);
         if (index_ == 0) {
           // At start of file, nothing before this token
           return StyledWord();
@@ -382,6 +450,9 @@ StyledWord FileWordProvider::getPrevWord() {
   // Case 2: Single character tokens
   else if (c == '\n' || c == '\t') {
     token += c;
+    if (c == '\n') {
+      currentParagraphAlignment_ = TextAlign::None;
+    }
   }
   // Case 3: Regular word - find start
   else {
@@ -407,6 +478,11 @@ StyledWord FileWordProvider::getPrevWord() {
     }
 
     // Build word from start to current position
+    // If token starts at file start but file begins with a UTF-8 BOM, skip the BOM
+    if (tokenStart == 0 && hasUtf8BomAtStart()) {
+      tokenStart = 3;
+    }
+
     for (size_t i = tokenStart; i <= index_; i++) {
       char cc = charAt(i);
       if (cc != '\r') {
@@ -423,6 +499,13 @@ StyledWord FileWordProvider::getPrevWord() {
   restoreStyleContext();
   FontStyle styleForWord = currentInlineStyle_;
 
+  // // DEBUG: print returned word with alignment
+  // {
+  //   // For prevWord, index_ is the start of word; alignment is updated by parseEscTokenBackward
+  //   TextAlign align = getParagraphAlignment();
+  //   printf("getPrevWord returning pos=%d token='%s' style=%d align=%d\n", getCurrentIndex(), token.c_str(),
+  //          (int)styleForWord, (int)align);
+  // }
   return StyledWord(token, styleForWord);
 }
 
@@ -510,26 +593,27 @@ void FileWordProvider::setPosition(int index) {
   prevIndex_ = index_;
   // Restore style context for the new position
   restoreStyleContext();
+  // If user set to start of file, skip UTF-8 BOM if present BEFORE computing alignment
+  if (index_ == 0) {
+    skipUtf8BomIfPresent();
+  }
+  // Recompute paragraph alignment for new position
+  computeParagraphAlignmentForPosition(index_);
   // Don't invalidate cache here - getParagraphAlignment will check if we're still in range
 }
 
 void FileWordProvider::reset() {
   index_ = 0;
   prevIndex_ = 0;
-  // Invalidate paragraph alignment cache
-  cachedParagraphStart_ = SIZE_MAX;
-  cachedParagraphEnd_ = SIZE_MAX;
-  cachedParagraphAlignment_ = TextAlign::Left;
+  // Paragraph alignment caching removed; nothing to invalidate.
+  // Skip UTF-8 BOM on reset
+  skipUtf8BomIfPresent();
+  computeParagraphAlignmentForPosition(index_);
 }
 
 TextAlign FileWordProvider::getParagraphAlignment() {
-  // Check if current position is within cached paragraph range
-  if (cachedParagraphStart_ != SIZE_MAX && index_ >= cachedParagraphStart_ && index_ < cachedParagraphEnd_) {
-    return cachedParagraphAlignment_;
-  }
-  // Need to update cache for new paragraph
-  updateParagraphAlignmentCache();
-  return cachedParagraphAlignment_;
+  // Return the computed paragraph alignment (may be None)
+  return currentParagraphAlignment_;
 }
 
 void FileWordProvider::findParagraphBoundaries(size_t pos, size_t& outStart, size_t& outEnd) {
@@ -555,40 +639,54 @@ void FileWordProvider::findParagraphBoundaries(size_t pos, size_t& outStart, siz
   }
 }
 
-void FileWordProvider::updateParagraphAlignmentCache() {
-  // Find paragraph boundaries for current position
-  size_t paraStart, paraEnd;
-  findParagraphBoundaries(index_, paraStart, paraEnd);
+void FileWordProvider::computeParagraphAlignmentForPosition(size_t pos) {
+  // Default to None (no alignment)
+  currentParagraphAlignment_ = TextAlign::None;
+  if (fileSize_ == 0)
+    return;
 
-  // Cache the boundaries
-  cachedParagraphStart_ = paraStart;
-  cachedParagraphEnd_ = paraEnd;
+  // If pos is beyond size, clamp
+  if (pos >= fileSize_)
+    pos = fileSize_ - 1;
 
-  // Default alignment
-  cachedParagraphAlignment_ = TextAlign::Left;
-
-  // Scan through all ESC tokens at start of paragraph to find alignment token
-  // There may be style tokens (like ESC+b from previous paragraph) before the alignment token
-  size_t scanPos = paraStart;
-  while (scanPos < paraEnd) {
-    if (charAt(scanPos) != ESC_CHAR) {
-      break;  // No more ESC tokens
+  // Walk left from current position until we find an ESC alignment token or newline
+  size_t p = pos;
+  while (true) {
+    if (p == 0) {
+      // Reached start of file without finding newline or token
+      break;
     }
-    // Try to parse as alignment token
-    TextAlign foundAlign;
-    size_t tokenLen = parseEscTokenAtPos(scanPos, &foundAlign, false);  // Don't process style
-    if (tokenLen == 0) {
-      break;  // Not a valid ESC token
+    // Check previous char for newline (paragraph boundary)
+    char prev = charAt(p - 1);
+    if (prev == '\n') {
+      // Found paragraph boundary; no alignment on this line
+      currentParagraphAlignment_ = TextAlign::None;
+      return;
     }
-    // Check if it was an alignment token (L, R, C, J)
-    char cmd = charAt(scanPos + 1);
-    if (cmd == 'L' || cmd == 'R' || cmd == 'C' || cmd == 'J') {
-      cachedParagraphAlignment_ = foundAlign;
-      break;  // Found alignment, stop scanning
+    // Check if we're at an ESC char
+    if (charAt(p - 1) == ESC_CHAR && p < fileSize_) {
+      char cmd = charAt(p);
+      TextAlign align;
+      if (tryGetAlignmentStart(cmd, &align)) {
+        currentParagraphAlignment_ = align;
+        return;
+      }
     }
-    // Skip this style token and continue looking for alignment
-    scanPos += tokenLen;
+    // Also check if current position is at ESC char (e.g., when p indexes ESC)
+    if (charAt(p) == ESC_CHAR && p + 1 < fileSize_) {
+      char cmd = charAt(p + 1);
+      TextAlign align;
+      if (tryGetAlignmentStart(cmd, &align)) {
+        currentParagraphAlignment_ = align;
+        return;
+      }
+    }
+    if (p == 0)
+      break;
+    p--;
   }
+  // If we fall out, no alignment found -> None
+  currentParagraphAlignment_ = TextAlign::None;
 }
 
 size_t FileWordProvider::findEscTokenStart(size_t trailingPos) {
@@ -620,36 +718,33 @@ void FileWordProvider::restoreStyleContext() {
   }
 
   // Scan forward from paragraph start to current position, processing style tokens
-  // This gives us the correct style state at the current position
   size_t scanPos = paraStart;
   while (scanPos < index_) {
-    // Check for ESC token
     if (charAt(scanPos) == ESC_CHAR && scanPos + 1 < fileSize_) {
+      FontStyle style;
       char cmd = charAt(scanPos + 1);
-      // Only process style tokens (not alignment which is paragraph-level)
-      switch (cmd) {
-        case 'B':
-          currentInlineStyle_ = FontStyle::BOLD;
-          break;
-        case 'b':
-          currentInlineStyle_ = FontStyle::REGULAR;
-          break;
-        case 'I':
-          currentInlineStyle_ = FontStyle::ITALIC;
-          break;
-        case 'i':
-          currentInlineStyle_ = FontStyle::REGULAR;
-          break;
-        case 'X':
-          currentInlineStyle_ = FontStyle::BOLD_ITALIC;
-          break;
-        case 'x':
-          currentInlineStyle_ = FontStyle::REGULAR;
-          break;
+      if (tryGetStyleForward(cmd, &style)) {
+        currentInlineStyle_ = style;
       }
       scanPos += 2;  // Skip ESC token
     } else {
       scanPos++;
     }
+  }
+}
+
+bool FileWordProvider::hasUtf8BomAtStart() {
+  if (fileSize_ < 3 || !file_)
+    return false;
+  // Make sure we have bytes in buffer
+  if (!ensureBufferForPos(0))
+    return false;
+  return (bufLen_ >= 3 && buf_[0] == 0xEF && buf_[1] == 0xBB && buf_[2] == 0xBF);
+}
+
+void FileWordProvider::skipUtf8BomIfPresent() {
+  if (hasUtf8BomAtStart() && index_ == 0) {
+    index_ = 3;
+    prevIndex_ = index_;
   }
 }

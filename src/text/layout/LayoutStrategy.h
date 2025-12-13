@@ -121,8 +121,8 @@ class LayoutStrategy {
                    TextAlignment defaultAlignment);
 
   // Word splitting helpers
-  HyphenSplit findBestHyphenSplitForward(const String& word, int16_t availableWidth, TextRenderer& renderer);
-  HyphenSplit findBestHyphenSplitBackward(const String& word, int16_t availableWidth, TextRenderer& renderer);
+  HyphenSplit findBestHyphenSplitForward(const Word& word, int16_t availableWidth, TextRenderer& renderer);
+  HyphenSplit findBestHyphenSplitBackward(const Word& word, int16_t availableWidth, TextRenderer& renderer);
 
   // Shared space width used by layout and navigation
   uint16_t spaceWidth_ = 0;

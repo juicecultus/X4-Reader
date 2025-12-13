@@ -7,7 +7,8 @@
  * Text alignment values supported by the reader
  */
 enum class TextAlign {
-  Left,    // Default left alignment
+  None,    // Default none alignment
+  Left,    // Left alignment
   Right,   // Right alignment
   Center,  // Center alignment
   Justify  // Justified text (both edges aligned)

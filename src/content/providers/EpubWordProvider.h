@@ -96,15 +96,16 @@ class EpubWordProvider : public WordProvider {
 
   // Emit style properties for a paragraph's classes and inline styles as an escaped token written to buffer
   void writeParagraphStyleToken(String& writeBuffer, const String& pendingParagraphClasses,
-                                const String& pendingInlineStyle, bool& paragraphClassesWritten);
+                                const String& pendingInlineStyle, bool& paragraphClassesWritten,
+                                std::vector<char>& paragraphStyleEmitted);
 
   // Emit inline style token (for bold/italic elements like <b>, <i>, <em>, <strong>, <span>)
-  // Returns true if a style token was emitted, false otherwise
-  bool writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
+  // Returns the uppercase command char emitted (e.g. 'B','I','X') or '\0' if none
+  char writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                              const String& styleAttr);
 
   // Emit style reset token (to return to normal after inline style element closes)
-  void writeStyleResetToken(String& writeBuffer);
+  void writeStyleResetToken(String& writeBuffer, char startCmd);
 
   // Helper to create directories recursively for a given path
   bool createDirRecursive(const String& path);

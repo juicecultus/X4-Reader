@@ -214,11 +214,11 @@ void testBidirectionalWordMatch(TestUtils::TestRunner& runner) {
   while (provider.hasNextWord()) {
     WordInfo info;
     info.positionBefore = provider.getCurrentIndex();
-    info.alignment = provider.getParagraphAlignment();
     StyledWord sw = provider.getNextWord();
+    info.positionAfter = provider.getCurrentIndex();
+    info.alignment = provider.getParagraphAlignment();
     info.word = sw.text;
     info.style = sw.style;
-    info.positionAfter = provider.getCurrentIndex();
     if (info.word.length() == 0)
       break;
     forwardWords.push_back(info);
@@ -234,11 +234,11 @@ void testBidirectionalWordMatch(TestUtils::TestRunner& runner) {
   while (provider.hasPrevWord()) {
     WordInfo info;
     info.positionAfter = provider.getCurrentIndex();
-    info.alignment = provider.getParagraphAlignment();
     StyledWord sw = provider.getPrevWord();
+    info.positionBefore = provider.getCurrentIndex();
+    info.alignment = provider.getParagraphAlignment();
     info.word = sw.text;
     info.style = sw.style;
-    info.positionBefore = provider.getCurrentIndex();
     if (info.word.length() == 0)
       break;
     backwardWords.push_back(info);
