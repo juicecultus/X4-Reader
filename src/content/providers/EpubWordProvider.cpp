@@ -292,8 +292,7 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
 
   String buffer;                     // Output buffer
   std::vector<String> elementStack;  // Track nested elements
-  std::vector<char>
-      inlineStyleEmitted;  // Track which inline style elements emitted tokens (store uppercase start char or '\0')
+  // Track inline style element stack (store per-element flags in object state)
   std::vector<char> paragraphStyleEmitted;  // Track paragraph style tokens emitted (uppercase)
   String pendingParagraphClasses;           // CSS classes for current block
   String pendingInlineStyle;                // Inline style attribute for current block
@@ -328,12 +327,13 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
         paragraphClassesWritten = false;
       }
 
-      // Handle inline style elements (b, strong, i, em, span) - just track them, don't emit yet
+      // Handle inline style elements (b, strong, i, em, span)
       if (isInlineStyleElement(name) && !parser.isEmptyElement()) {
         String classAttr = parser.getAttribute("class");
         String styleAttr = parser.getAttribute("style");
-        char emitted = writeInlineStyleToken(buffer, name, classAttr, styleAttr);
-        inlineStyleEmitted.push_back(emitted);
+        // writeInlineStyleToken will push state into inlineStyleStack_ and
+        // emit a combined token if necessary (supports bold+italic stacking)
+        (void)writeInlineStyleToken(buffer, name, classAttr, styleAttr);
       }
 
       // Handle <br/> - only add newline if line has content
@@ -365,12 +365,8 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
       String name = parser.getName();
 
       // Handle end of inline style elements
-      if (isInlineStyleElement(name) && !inlineStyleEmitted.empty()) {
-        char emitted = inlineStyleEmitted.back();
-        inlineStyleEmitted.pop_back();
-        if (emitted != '\0') {
-          writeStyleResetToken(buffer, emitted);
-        }
+      if (isInlineStyleElement(name) && !inlineStyleStack_.empty()) {
+        closeInlineStyleElement(buffer);
       }
 
       // Block elements: add newline if line had content OR had &nbsp;
@@ -391,18 +387,11 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
           }
 
           // Close any open inline styles at paragraph end to prevent carry-over between paragraphs
-          std::vector<char> tempStack = inlineStyleEmitted;  // Copy stack to close in reverse order
-          while (!tempStack.empty()) {
-            char emitted = tempStack.back();
-            tempStack.pop_back();
-            if (emitted != '\0') {
-              writeStyleResetToken(buffer, emitted);
-            }
+          if (currentInlineCombined_ != '\0') {
+            writeStyleResetToken(buffer, currentInlineCombined_);
+            currentInlineCombined_ = '\0';
           }
-          // Clear the stack since we closed them
-          while (!inlineStyleEmitted.empty()) {
-            inlineStyleEmitted.pop_back();
-          }
+          inlineStyleStack_.clear();
 
           buffer += "\n";
         }
@@ -490,13 +479,11 @@ void EpubWordProvider::performXhtmlToTxtConversion(SimpleXmlParser& parser, File
   }
 
   // Close any remaining inline styles
-  while (!inlineStyleEmitted.empty()) {
-    char emitted = inlineStyleEmitted.back();
-    inlineStyleEmitted.pop_back();
-    if (emitted != '\0') {
-      writeStyleResetToken(buffer, emitted);
-    }
+  if (currentInlineCombined_ != '\0') {
+    writeStyleResetToken(buffer, currentInlineCombined_);
+    currentInlineCombined_ = '\0';
   }
+  inlineStyleStack_.clear();
 
   // Periodic flush and final flush using write() to verify bytes written
   if (outBytes)
@@ -625,60 +612,100 @@ String EpubWordProvider::trimLeadingSpaces(const String& text) {
 }
 char EpubWordProvider::writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                                              const String& styleAttr) {
-  // Determine style from element name and/or CSS classes
-  bool isBold = false;
-  bool isItalic = false;
-
-  // Check element name for implicit styling
+  // Determine style flags for this element (from tag name, classes, inline styles)
+  InlineStyleState state;
+  // Tag name
   if (elementName == "b" || elementName == "strong") {
-    isBold = true;
+    state.bold = true;
   } else if (elementName == "i" || elementName == "em") {
-    isItalic = true;
+    state.italic = true;
   }
 
   // Check CSS classes and inline styles for additional styling
   const CssParser* css = epubReader_ ? epubReader_->getCssParser() : nullptr;
   if (css) {
     CssStyle combined;
-
-    // Get class-based styles
     if (!classAttr.isEmpty()) {
       combined = css->getCombinedStyle(classAttr);
     }
-
-    // Merge inline styles
     if (!styleAttr.isEmpty()) {
       CssStyle inlineStyle = css->parseInlineStyle(styleAttr);
       combined.merge(inlineStyle);
     }
-
-    // Apply CSS-defined styles
     if (combined.hasFontWeight && combined.fontWeight == CssFontWeight::Bold) {
-      isBold = true;
+      state.bold = true;
     }
     if (combined.hasFontStyle && combined.fontStyle == CssFontStyle::Italic) {
-      isItalic = true;
+      state.italic = true;
     }
   }
 
-  // Only emit token if there's a style to apply
-  // Format: ESC + 'B'(bold), 'I'(italic), 'X'(bold+italic)
-  if (isBold || isItalic) {
-    writeBuffer += (char)0x1B;  // ESC
+  // Push this element's style onto the stack
+  inlineStyleStack_.push_back(state);
 
-    if (isBold && isItalic) {
-      writeBuffer += 'X';
-      return 'X';
-    } else if (isBold) {
-      writeBuffer += 'B';
-      return 'B';
-    } else {
-      writeBuffer += 'I';
-      return 'I';
-    }
+  // Compute new combined style across the stack
+  bool anyBold = false;
+  bool anyItalic = false;
+  for (const auto& s : inlineStyleStack_) {
+    anyBold = anyBold || s.bold;
+    anyItalic = anyItalic || s.italic;
   }
 
-  return '\0';  // No style token emitted
+  char newCombined = '\0';
+  if (anyBold && anyItalic)
+    newCombined = 'X';
+  else if (anyBold)
+    newCombined = 'B';
+  else if (anyItalic)
+    newCombined = 'I';
+
+  // If the effective combined style changed, transition tokens
+  if (newCombined != currentInlineCombined_) {
+    if (currentInlineCombined_ != '\0') {
+      writeStyleResetToken(writeBuffer, currentInlineCombined_);
+    }
+    if (newCombined != '\0') {
+      writeBuffer += (char)0x1B;
+      writeBuffer += newCombined;
+    }
+    currentInlineCombined_ = newCombined;
+  }
+
+  return newCombined;
+}
+
+void EpubWordProvider::closeInlineStyleElement(String& writeBuffer) {
+  if (inlineStyleStack_.empty())
+    return;
+
+  // Pop the last element and recompute combined style
+  inlineStyleStack_.pop_back();
+
+  bool anyBold = false;
+  bool anyItalic = false;
+  for (const auto& s : inlineStyleStack_) {
+    anyBold = anyBold || s.bold;
+    anyItalic = anyItalic || s.italic;
+  }
+
+  char newCombined = '\0';
+  if (anyBold && anyItalic)
+    newCombined = 'X';
+  else if (anyBold)
+    newCombined = 'B';
+  else if (anyItalic)
+    newCombined = 'I';
+
+  if (newCombined != currentInlineCombined_) {
+    if (currentInlineCombined_ != '\0') {
+      writeStyleResetToken(writeBuffer, currentInlineCombined_);
+    }
+    if (newCombined != '\0') {
+      writeBuffer += (char)0x1B;
+      writeBuffer += newCombined;
+    }
+    currentInlineCombined_ = newCombined;
+  }
 }
 
 void EpubWordProvider::writeStyleResetToken(String& writeBuffer, char startCmd) {

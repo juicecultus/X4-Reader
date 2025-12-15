@@ -116,6 +116,17 @@ class EpubWordProvider : public WordProvider {
   char writeInlineStyleToken(String& writeBuffer, const String& elementName, const String& classAttr,
                              const String& styleAttr);
 
+  // Close an inline style element (called when an inline element ends)
+  void closeInlineStyleElement(String& writeBuffer);
+
+  // Track active inline style stack for correct combined styling (bold+italic = 'X')
+  struct InlineStyleState {
+    bool bold = false;
+    bool italic = false;
+  };
+  std::vector<InlineStyleState> inlineStyleStack_;
+  char currentInlineCombined_ = '\0';
+
   // Emit style reset token (to return to normal after inline style element closes)
   void writeStyleResetToken(String& writeBuffer, char startCmd);
 

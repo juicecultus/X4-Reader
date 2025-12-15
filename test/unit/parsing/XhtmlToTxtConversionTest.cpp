@@ -212,6 +212,97 @@ void testConversion(TestUtils::TestRunner& runner) {
   }
 }
 
+/**
+ * Test: Inline style stacking (bold + italic)
+ */
+void testInlineStyleStacking(TestUtils::TestRunner& runner) {
+  std::cout << "\n=== Test: Inline Style Stacking ===\n";
+
+  const char* stackHtmlPath = "C:/Users/Patrick/Desktop/microreader/resources/books/inline_stack_test.html";
+
+  // Create a small test file with nested bold/italic
+  std::string html =
+      "<html><head><title>Stack</title></head><body>"
+      "<p><b><i>Stacked</i></b></p>"
+      "<p><i><b>Stacked2</b></i></p>"
+      "<p><b>Outer <i>Inner</i> Outer</b></p>"
+      "</body></html>";
+
+  // Write file
+  {
+    std::ofstream out(stackHtmlPath);
+    if (!out.is_open()) {
+      std::cout << "ERROR: Failed to write test HTML: " << stackHtmlPath << "\n";
+      runner.expectTrue(false, "Should be able to write test HTML");
+      return;
+    }
+    out << html;
+  }
+
+  // Create provider
+  EpubWordProvider provider(stackHtmlPath);
+  if (!provider.isValid()) {
+    std::cout << "ERROR: Failed to create EpubWordProvider for stacking test\n";
+    runner.expectTrue(false, "Provider should be valid");
+    return;
+  }
+
+  // Read converted TXT
+  std::string expectedTxtPath = stackHtmlPath;
+  size_t dotPos = expectedTxtPath.rfind('.');
+  if (dotPos != std::string::npos) {
+    expectedTxtPath = expectedTxtPath.substr(0, dotPos) + ".txt";
+  }
+  std::string output = readFileContents(expectedTxtPath);
+  if (output.empty()) {
+    std::cout << "ERROR: Output file is empty or not found for stacking test\n";
+    runner.expectTrue(false, "Output should not be empty");
+    return;
+  }
+
+  printWithMarkers(output);
+
+  // Helper: check that near the word we have ESC+X before and ESC+x after
+  auto checkWrapped = [&](const std::string& word) {
+    size_t pos = output.find(word);
+    if (pos == std::string::npos) {
+      std::cout << "ERROR: Word not found: " << word << "\n";
+      return false;
+    }
+    bool okBefore = false;
+    if (pos >= 2 && output[pos - 2] == (char)0x1B && output[pos - 1] == 'X')
+      okBefore = true;
+    bool okAfter = false;
+    size_t afterPos = pos + word.length();
+    if (afterPos + 1 < output.length() && output[afterPos] == (char)0x1B && output[afterPos + 1] == 'x')
+      okAfter = true;
+    std::cout << "Check '" << word << "' : before(X)=" << (okBefore ? "YES" : "NO")
+              << " after(x)=" << (okAfter ? "YES" : "NO") << "\n";
+    runner.expectTrue(okBefore && okAfter, std::string("Word '") + word + " should be wrapped with X/x");
+    return okBefore && okAfter;
+  };
+
+  checkWrapped("Stacked");
+  checkWrapped("Stacked2");
+
+  // For Inner, also expect a restore to B after the inner close (x then B)
+  size_t innerPos = output.find("Inner");
+  if (innerPos != std::string::npos) {
+    bool beforeX = (innerPos >= 2 && output[innerPos - 2] == (char)0x1B && output[innerPos - 1] == 'X');
+    bool afterXThenB = false;
+    size_t afterInner = innerPos + 5;  // length of "Inner"
+    if (afterInner + 3 < output.length() && output[afterInner] == (char)0x1B && output[afterInner + 1] == 'x' &&
+        output[afterInner + 2] == (char)0x1B && output[afterInner + 3] == 'B') {
+      afterXThenB = true;
+    }
+    std::cout << "Inner check: beforeX=" << (beforeX ? "YES" : "NO")
+              << " after(x then B)=" << (afterXThenB ? "YES" : "NO") << "\n";
+    runner.expectTrue(beforeX && afterXThenB, "Inner should be X then restored to B after closing inner element");
+  } else {
+    runner.expectTrue(false, "Inner not found");
+  }
+}
+
 int main() {
   std::cout << "========================================\n";
   std::cout << "XHTML to TXT Conversion Test\n";
@@ -220,6 +311,7 @@ int main() {
   TestUtils::TestRunner runner("XhtmlToTxtConversion");
 
   testConversion(runner);
+  testInlineStyleStacking(runner);
 
   std::cout << "\n========================================\n";
   runner.printSummary();
