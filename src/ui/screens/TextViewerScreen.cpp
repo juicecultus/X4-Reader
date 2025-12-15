@@ -267,11 +267,22 @@ void TextViewerScreen::showPage() {
 
     textRenderer.setFont(&Font14);
 
-    // Build indicator string: "ChapterName - Z%" or just "Z%" if no chapter name
+    // Build indicator string with chapter info if available
+    // Format: "Ch X/Y - Z%" or "ChapterName (X/Y) - Z%" or just "Z%"
     String indicator;
-    String chapterName = provider->getCurrentChapterName();
-    if (!chapterName.isEmpty()) {
-      indicator = chapterName + " - ";
+    if (provider->hasChapters() && provider->getChapterCount() > 1) {
+      int currentCh = provider->getCurrentChapter() + 1;  // 1-indexed for display
+      int totalCh = provider->getChapterCount();
+      String chapterName = provider->getCurrentChapterName();
+      if (!chapterName.isEmpty()) {
+        // Truncate long chapter names
+        if (chapterName.length() > 20) {
+          chapterName = chapterName.substring(0, 17) + "...";
+        }
+        indicator = chapterName + " (" + String(currentCh) + "/" + String(totalCh) + ") - ";
+      } else {
+        indicator = "Ch " + String(currentCh) + "/" + String(totalCh) + " - ";
+      }
     }
     indicator += String((int)(pagePercentage * 100)) + "%";
 
