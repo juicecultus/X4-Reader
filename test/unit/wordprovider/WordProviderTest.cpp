@@ -47,6 +47,8 @@ const char* fontStyleToString(FontStyle style) {
       return "italic";
     case FontStyle::BOLD_ITALIC:
       return "bold_italic";
+    case FontStyle::HIDDEN:
+      return "hidden";
     default:
       return "unknown";
   }

@@ -294,8 +294,13 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const Strin
         spaces = 0;
       if (spaces > 12)
         spaces = 12;
+
+      writeBuffer += (char)0x1B;  // ESC
+      writeBuffer += 'H';
       for (int i = 0; i < spaces; ++i)
-        writeBuffer += ' ';
+        writeBuffer += '-';
+      writeBuffer += (char)0x1B;  // ESC
+      writeBuffer += 'h';
     }
 
     // Paragraph-level CSS may also include font-weight/font-style which we

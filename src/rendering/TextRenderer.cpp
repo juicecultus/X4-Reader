@@ -208,6 +208,19 @@ void TextRenderer::drawChar(uint32_t codepoint) {
   }
 
   const SimpleGFXfont* f = currentFont;
+
+  // For hidden text, advance cursor without drawing
+  if (currentStyle == FontStyle::HIDDEN) {
+    int glyphIndex = findGlyphIndex(f, codepoint);
+    if (glyphIndex >= 0) {
+      const SimpleGFXglyph* glyph = &f->glyph[glyphIndex];
+      cursorX += glyph->xAdvance;
+    } else {
+      cursorX += FALLBACK_GLYPH_WIDTH;
+    }
+    return;
+  }
+
   int glyphIndex = findGlyphIndex(f, codepoint);
 
   if (glyphIndex < 0) {

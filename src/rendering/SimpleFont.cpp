@@ -41,6 +41,8 @@ const SimpleGFXfont* getFontVariant(const FontFamily* family, FontStyle style) {
       return family->italic ? family->italic : family->regular;
     case FontStyle::BOLD_ITALIC:
       return family->boldItalic ? family->boldItalic : (family->bold ? family->bold : family->regular);
+    case FontStyle::HIDDEN:
+      return family->regular;  // Use regular font but don't draw
     default:
       return family->regular;
   }

@@ -8,7 +8,7 @@
 // Format: ESC + command byte (2 bytes total, fixed length)
 // Alignment commands (start of line): ESC + 'L'(left), 'R'(right), 'C'(center), 'J'(justify)
 // Style commands (inline): ESC + 'B'(bold on), 'b'(bold off), 'I'(italic on), 'i'(italic off),
-//                          'X'(bold+italic on), 'x'(bold+italic off)
+//                          'X'(bold+italic on), 'x'(bold+italic off), 'H'(hidden on), 'h'(hidden off)
 static constexpr char ESC_CHAR = '\x1B';
 
 // Helper functions for mapping ESC command chars to alignments / styles
@@ -83,6 +83,14 @@ static bool tryGetStyleForward(char cmd, FontStyle* out) {
       if (out)
         *out = FontStyle::REGULAR;
       return true;
+    case 'H':
+      if (out)
+        *out = FontStyle::HIDDEN;
+      return true;
+    case 'h':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
   }
   return false;
 }
@@ -112,6 +120,14 @@ static bool tryGetStyleBackward(char cmd, FontStyle* out) {
     case 'x':
       if (out)
         *out = FontStyle::BOLD_ITALIC;
+      return true;
+    case 'H':
+      if (out)
+        *out = FontStyle::REGULAR;
+      return true;
+    case 'h':
+      if (out)
+        *out = FontStyle::HIDDEN;
       return true;
   }
   return false;

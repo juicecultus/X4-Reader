@@ -3,7 +3,7 @@
 #include <cstdint>
 
 // Enum for font styles (expandable for future styles)
-enum class FontStyle { REGULAR = 0, BOLD, ITALIC, BOLD_ITALIC };
+enum class FontStyle { REGULAR = 0, BOLD, ITALIC, BOLD_ITALIC, HIDDEN };
 
 // Minimal font struct used by our TextRenderer
 typedef struct {
