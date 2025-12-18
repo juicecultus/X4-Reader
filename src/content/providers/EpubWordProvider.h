@@ -6,12 +6,12 @@
 #include <cstdint>
 #include <vector>
 
+#include "../../text/hyphenation/HyphenationStrategy.h"
 #include "../epub/EpubReader.h"
 #include "../xml/SimpleXmlParser.h"
 #include "FileWordProvider.h"
 #include "StringWordProvider.h"
 #include "WordProvider.h"
-#include "../../text/hyphenation/HyphenationStrategy.h"
 
 class EpubWordProvider : public WordProvider {
  public:

@@ -78,6 +78,14 @@ void TextViewerScreen::loadSettingsFromFile() {
   if (savedPath.length() > 0) {
     pendingOpenPath = savedPath;
   }
+
+  // Load chapter numbers display setting (default to true)
+  int showChapterNumbersInt = 1;  // Default to true
+  if (s.getInt(String("textviewer.showChapterNumbers"), showChapterNumbersInt)) {
+    showChapterNumbers = (showChapterNumbersInt != 0);
+  } else {
+    showChapterNumbers = true;  // Default if not found
+  }
 }
 
 void TextViewerScreen::saveSettingsToFile() {
@@ -94,6 +102,9 @@ void TextViewerScreen::saveSettingsToFile() {
                String(layoutConfig.minSpaceWidth) + "," + String(layoutConfig.pageWidth) + "," +
                String(layoutConfig.pageHeight);
   s.setString(String("textviewer.layout"), csv);
+
+  // Save chapter numbers display setting
+  s.setInt(String("textviewer.showChapterNumbers"), showChapterNumbers ? 1 : 0);
 
   if (!s.save()) {
     Serial.println("TextViewerScreen: Failed to write settings.cfg");
@@ -234,16 +245,22 @@ void TextViewerScreen::showPage() {
     // Format: "Ch X/Y - Z%" or "ChapterName (X/Y) - Z%" or just "Z%"
     String indicator;
     if (provider->hasChapters() && provider->getChapterCount() > 1) {
-      int currentCh = provider->getCurrentChapter() + 1;  // 1-indexed for display
-      int totalCh = provider->getChapterCount();
       String chapterName = provider->getCurrentChapterName();
       if (!chapterName.isEmpty()) {
         // Truncate long chapter names
-        if (chapterName.length() > 20) {
-          chapterName = chapterName.substring(0, 17) + "...";
+        if (chapterName.length() > 30) {
+          chapterName = chapterName.substring(0, 27) + "...";
         }
-        indicator = chapterName + " (" + String(currentCh) + "/" + String(totalCh) + ") - ";
-      } else {
+        indicator = chapterName;
+        if (showChapterNumbers) {
+          int currentCh = provider->getCurrentChapter() + 1;  // 1-indexed for display
+          int totalCh = provider->getChapterCount();
+          indicator += " (" + String(currentCh) + "/" + String(totalCh) + ")";
+        }
+        indicator += " - ";
+      } else if (showChapterNumbers) {
+        int currentCh = provider->getCurrentChapter() + 1;  // 1-indexed for display
+        int totalCh = provider->getChapterCount();
         indicator = "Ch " + String(currentCh) + "/" + String(totalCh) + " - ";
       }
     }

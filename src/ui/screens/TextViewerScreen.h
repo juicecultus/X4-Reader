@@ -56,6 +56,8 @@ class TextViewerScreen : public Screen {
   // show()/activate() will open it when the screen is shown so begin() remains
   // an init-only function and doesn't draw to the display.
   String pendingOpenPath;
+  // Whether to show chapter numbers in the page indicator
+  bool showChapterNumbers = true;
 
   // Persist/load current reading position for `currentFilePath`
   void savePositionToFile();
