@@ -3,10 +3,10 @@
 A minimal EPUB/TXT reader for ESP32-C3 e-ink devices.
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-  <img src="resources/images/20251218_181610.jpg" alt="Sample 1" style="width: 100%;">
-  <img src="resources/images/20251218_181719.jpg" alt="Sample 2" style="width: 100%;">
-  <img src="resources/images/20251218_181444.jpg" alt="Sample 3" style="width: 100%;">
-  <img src="resources/images/20251218_181453.jpg" alt="Sample 4" style="width: 100%;">
+  <img src="resources/images/20251218_181610.jpg" alt="Sample 1" style="width: 49%;">
+  <img src="resources/images/20251218_181719.jpg" alt="Sample 2" style="width: 49%;">
+  <img src="resources/images/20251218_181444.jpg" alt="Sample 3" style="width: 49%;">
+  <img src="resources/images/20251218_181453.jpg" alt="Sample 4" style="width: 49%;">
 </div>
 
 ## Features
