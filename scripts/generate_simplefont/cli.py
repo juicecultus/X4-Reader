@@ -210,6 +210,9 @@ def main(argv=None):
             else:
                 codes.append(int(part))
 
+    # Sort and deduplicate codes by codepoint
+    codes = sorted(set(codes))
+
     # derive dimensions from size: heuristics — width is half the size, height=size
     size = args.size
 
