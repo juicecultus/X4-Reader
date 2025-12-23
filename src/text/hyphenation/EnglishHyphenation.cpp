@@ -8,7 +8,7 @@ std::vector<size_t> EnglishHyphenation::hyphenate(const std::string& word, size_
   const int MAX_POSITIONS = 32;
   int out_positions[MAX_POSITIONS];
 
-  int count = liang_hyphenate(word.c_str(), 2, 2, '.', out_positions, MAX_POSITIONS, english_patterns);
+  int count = liang_hyphenate(word.c_str(), 2, 2, '.', out_positions, MAX_POSITIONS, en_us_patterns);
 
   std::vector<size_t> positions;
   for (int i = 0; i < count; ++i) {

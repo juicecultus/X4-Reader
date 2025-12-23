@@ -12,34 +12,33 @@
 #define MAX_HYPHEN_POSITIONS 32
 #endif
 
-// Compare a null-terminated pattern string `pat` with a segment `seg` of
+// Compare a pattern byte array `pat` of length `patlen` with a segment `seg` of
 // length `seglen`. Returns <0 if pat < seg, 0 if equal, >0 if pat > seg.
-static int compare_pattern_segment(const char* pat, const char* seg, int seglen) {
-  int i = 0;
-  while (pat[i] != '\0' && i < seglen) {
+static int compare_pattern_segment(const std::uint8_t* pat, int patlen, const char* seg, int seglen) {
+  int len = patlen < seglen ? patlen : seglen;
+  for (int i = 0; i < len; ++i) {
     unsigned char a = (unsigned char)pat[i];
     unsigned char b = (unsigned char)seg[i];
     if (a != b)
       return (int)a - (int)b;
-    i++;
   }
-  if (pat[i] == '\0' && i == seglen)
-    return 0;  // exact match
-  if (pat[i] == '\0')
+  if (patlen < seglen)
     return -1;  // pat shorter
-  return 1;     // seg shorter (pat > seg prefix)
+  if (patlen > seglen)
+    return 1;  // seg shorter
+  return 0;    // equal
 }
 
 // Binary-search for a pattern equal to the segment `seg` of length `seglen`.
 // Returns index in `patterns` or -1 if not found.
-static int find_pattern_index(const char* seg, int seglen, const LiangHyphenationPatterns& pats) {
+static int find_pattern_index(const char* seg, int seglen, const HyphenationPatterns& pats) {
   if (pats.count == 0)
     return -1;
   int lo = 0;
   int hi = (int)pats.count - 1;
   while (lo <= hi) {
     int mid = (lo + hi) >> 1;
-    int cmp = compare_pattern_segment(pats.patterns[mid].letters, seg, seglen);
+    int cmp = compare_pattern_segment(pats.patterns[mid].letters, pats.patterns[mid].letters_len, seg, seglen);
     if (cmp == 0)
       return mid;
     if (cmp < 0)
@@ -53,7 +52,7 @@ static int find_pattern_index(const char* seg, int seglen, const LiangHyphenatio
 // Hyphenate into an output integer buffer. Returns number of positions written.
 // This function avoids heap allocations by using fixed-size local arrays.
 int liang_hyphenate(const char* word, int leftmin, int rightmin, char boundary_char, int* out_positions,
-                    int max_positions, const LiangHyphenationPatterns& pats) {
+                    int max_positions, const HyphenationPatterns& pats) {
   if (!word)
     return 0;
   int word_len = (int)std::strlen(word);

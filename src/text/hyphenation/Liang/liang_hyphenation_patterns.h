@@ -1,20 +1,19 @@
-#ifndef LIANG_HYPHENATION_PATTERNS_H
-#define LIANG_HYPHENATION_PATTERNS_H
+#ifndef HYPHENATION_PATTERNS_H
+#define HYPHENATION_PATTERNS_H
 
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 
-struct LiangPattern
-{
-    const char *letters;
-    const std::uint8_t *values;
-    std::uint8_t values_len;
+struct PatternC {
+  const std::uint8_t* letters;
+  const std::uint8_t* values;
+  std::uint8_t letters_len;
+  std::uint8_t values_len;
 };
 
-struct LiangHyphenationPatterns
-{
-    const LiangPattern *patterns;
-    size_t count;
+struct HyphenationPatterns {
+  const PatternC* patterns;
+  size_t count;
 };
 
-#endif // LIANG_HYPHENATION_PATTERNS_H
+#endif  // HYPHENATION_PATTERNS_H

@@ -221,7 +221,7 @@ void printResults(const std::string& language, const std::vector<TestCase>& test
 }
 
 int main(int argc, char* argv[]) {
-  std::string language = "english";  // default
+  std::string language = "german";  // default
 
   if (argc > 1) {
     language = argv[1];

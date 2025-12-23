@@ -31,37 +31,6 @@ std::vector<int> HyphenationStrategy::findHyphenPositions(const std::string& wor
 }
 
 /**
- * German hyphenation strategy implementation
- */
-class GermanHyphenationStrategy : public HyphenationStrategy {
- public:
-  std::vector<size_t> hyphenate(const std::string& word, size_t minWordLength = 6,
-                                size_t minFragmentLength = 3) override {
-    // Only hyphenate words that meet minimum length requirement
-    if (word.length() < minWordLength) {
-      return std::vector<size_t>();
-    }
-
-    // Get hyphenation positions from German algorithm
-    std::vector<size_t> positions = GermanHyphenation::hyphenate(word);
-
-    // Filter out positions that would create fragments that are too short
-    std::vector<size_t> filtered;
-    for (size_t pos : positions) {
-      if (pos >= minFragmentLength && pos <= word.length() - minFragmentLength) {
-        filtered.push_back(pos);
-      }
-    }
-
-    return filtered;
-  }
-
-  Language getLanguage() const override {
-    return Language::GERMAN;
-  }
-};
-
-/**
  * Factory function implementation
  */
 HyphenationStrategy* createHyphenationStrategy(Language language) {
@@ -71,7 +40,7 @@ HyphenationStrategy* createHyphenationStrategy(Language language) {
     case Language::ENGLISH:
       return new EnglishHyphenation();
     case Language::GERMAN:
-      return new GermanHyphenationStrategy();
+      return new GermanHyphenation();
     case Language::NONE:
     default:
       return new NoHyphenation();
