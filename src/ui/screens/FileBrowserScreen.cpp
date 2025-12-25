@@ -133,7 +133,18 @@ void FileBrowserScreen::renderSdBrowser() {
 void FileBrowserScreen::confirm() {
   if (!sdFiles.empty()) {
     String filename = sdFiles[sdSelectedIndex];
-    String fullPath = String("/") + filename;
+    String fullPath;
+    // SD.openNextFile() name format varies by core; it may be either basename
+    // ("foo.epub") or include path ("/books/foo.epub" or "books/foo.epub").
+    if (filename.startsWith("/")) {
+      fullPath = filename;
+    } else if (filename.indexOf('/') >= 0) {
+      fullPath = String("/") + filename;
+    } else if (browsePath == "/" || browsePath.length() == 0) {
+      fullPath = String("/") + filename;
+    } else {
+      fullPath = browsePath + String("/") + filename;
+    }
     Serial.printf("Selected file: %s\n", fullPath.c_str());
 
     // Ask UI manager to open the selected file in the text viewer
@@ -169,7 +180,18 @@ void FileBrowserScreen::offsetSelection(int offset) {
   // Persist the current selection into consolidated settings
   if (!sdFiles.empty()) {
     Settings& s = uiManager.getSettings();
-    s.setString(String("filebrowser.selected"), sdFiles[sdSelectedIndex]);
+    String raw = sdFiles[sdSelectedIndex];
+    String full;
+    if (raw.startsWith("/")) {
+      full = raw;
+    } else if (raw.indexOf('/') >= 0) {
+      full = String("/") + raw;
+    } else if (browsePath == "/" || browsePath.length() == 0) {
+      full = String("/") + raw;
+    } else {
+      full = browsePath + String("/") + raw;
+    }
+    s.setString(String("filebrowser.selected"), full);
   }
 
   show();
@@ -183,7 +205,11 @@ void FileBrowserScreen::loadFolder(int maxFiles) {
     return;
   }
 
-  auto files = sdManager.listFiles("/", maxFiles);
+  // Default to /books when present, otherwise fall back to root.
+  // This keeps the UX simple while allowing users to keep books organized.
+  browsePath = sdManager.isDirectory("/books") ? String("/books") : String("/");
+
+  auto files = sdManager.listFiles(browsePath.c_str(), maxFiles);
   for (auto& name : files) {
     // Include .txt and .epub files (case-insensitive)
     if (name.length() >= 4) {
@@ -216,7 +242,20 @@ void FileBrowserScreen::loadFolder(int maxFiles) {
     String saved = s.getString(String("filebrowser.selected"), String(""));
     if (saved.length() > 0) {
       for (size_t i = 0; i < sdFiles.size(); ++i) {
-        if (sdFiles[i] == saved) {
+        // Compare both raw listing name and computed full path.
+        String raw = sdFiles[i];
+        String full;
+        if (raw.startsWith("/")) {
+          full = raw;
+        } else if (raw.indexOf('/') >= 0) {
+          full = String("/") + raw;
+        } else if (browsePath == "/" || browsePath.length() == 0) {
+          full = String("/") + raw;
+        } else {
+          full = browsePath + String("/") + raw;
+        }
+
+        if (raw == saved || full == saved) {
           sdSelectedIndex = (int)i;
           if (sdSelectedIndex >= SD_LINES_PER_SCREEN)
             sdScrollOffset = sdSelectedIndex - SD_LINES_PER_SCREEN + 1;

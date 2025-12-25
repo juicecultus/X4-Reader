@@ -39,6 +39,7 @@ class FileBrowserScreen : public Screen {
   std::vector<String> sdFiles;
   int sdSelectedIndex = 0;
   int sdScrollOffset = 0;
+  String browsePath = "/books";
 
   static const int SD_LINES_PER_SCREEN = 8;
 };

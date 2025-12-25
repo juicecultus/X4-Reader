@@ -29,6 +29,21 @@ bool SDCardManager::ready() const {
   return initialized;
 }
 
+bool SDCardManager::isDirectory(const char* path) {
+  if (!initialized) {
+    return false;
+  }
+
+  File f = SD.open(path);
+  if (!f) {
+    return false;
+  }
+
+  bool isDir = f.isDirectory();
+  f.close();
+  return isDir;
+}
+
 std::vector<String> SDCardManager::listFiles(const char* path, int maxFiles) {
   std::vector<String> ret;
   if (!initialized) {
