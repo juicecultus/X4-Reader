@@ -30,33 +30,51 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          cp .pio/build/esp32-c3-devkitm-1/firmware.bin dist/x4reader.bin
+          cp .pio/build/esp32-c3-devkitm-1/firmware.bin dist/X4Reader.bin
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: x4reader
-          path: dist/x4reader.bin
+          name: X4Reader
+          path: dist/X4Reader.bin
 
-      - name: Compute release tag
-        id: release
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v0.0.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Compute next tag (0.1.x)
+        id: next_tag
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+            const versions = tags
+              .map(t => t.name)
+              .filter(name => /^0\.1\.\d+$/.test(name))
+              .map(name => Number(name.split('.')[2]))
+              .filter(n => Number.isFinite(n));
+            const nextPatch = versions.length ? Math.max(...versions) + 1 : 0;
+            const nextTag = `0.1.${nextPatch}`;
+            core.setOutput('tag', nextTag);
 
-      - name: Upload to release
+      - name: Create tag ref
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = '${{ steps.next_tag.outputs.tag }}';
+            const ref = `refs/tags/${tag}`;
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref,
+              sha: process.env.GITHUB_SHA,
+            });
+
+      - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/x4reader.bin
-          tag_name: ${{ steps.release.outputs.tag }}
+          files: dist/X4Reader.bin
+          tag_name: ${{ steps.next_tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.next_tag.outputs.tag }}
           generate_release_notes: false
-          body_path: Release_guide.md
-          prerelease: ${{ steps.release.outputs.prerelease }}
