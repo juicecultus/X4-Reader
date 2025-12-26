@@ -135,20 +135,16 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
   } else if (buttons.isDown(Buttons::LEFT) || buttons.isDown(Buttons::VOLUME_UP)) {
     uint8_t btn = buttons.isDown(Buttons::LEFT) ? Buttons::LEFT : Buttons::VOLUME_UP;
     if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
-      // Long press - jump to next chapter (or end if last chapter)
-      jumpToNextChapter();
+      jumpToPreviousChapter();
     } else {
-      // Short press - go to next page (or next chapter if at end)
-      nextPage();
+      prevPage();
     }
   } else if (buttons.isDown(Buttons::RIGHT) || buttons.isDown(Buttons::VOLUME_DOWN)) {
     uint8_t btn = buttons.isDown(Buttons::RIGHT) ? Buttons::RIGHT : Buttons::VOLUME_DOWN;
     if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
-      // Long press - go to chapter start, then previous chapter
-      jumpToPreviousChapter();
+      jumpToNextChapter();
     } else {
-      // Short press - go to previous page
-      prevPage();
+      nextPage();
     }
   }
 

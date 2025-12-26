@@ -41,7 +41,7 @@ SDCardManager sdManager(EPD_SCLK, SD_SPI_MISO, EPD_MOSI, SD_SPI_CS, EINK_SPI_CS)
 // Battery ADC pin and global instance
 #define BAT_GPIO0 0
 BatteryMonitor g_battery(BAT_GPIO0);
-UIManager uiManager(einkDisplay, sdManager);
+UIManager* uiManager = nullptr;
 
 // Button update task - runs continuously to keep button state fresh
 void buttonUpdateTask(void* parameter) {
@@ -111,10 +111,12 @@ void enterDeepSleep() {
   Serial.println("Power button long press detected. Entering deep sleep.");
 
   // Let UI save any persistent state before we render the sleep screen
-  uiManager.prepareForSleep();
+  if (uiManager)
+    uiManager->prepareForSleep();
 
   // Show sleep screen
-  uiManager.showSleepScreen();
+  if (uiManager)
+    uiManager->showSleepScreen();
 
   // Enter deep sleep mode
   // this seems to start the display and leads to grayish screen somehow???
@@ -171,7 +173,8 @@ void setup() {
   einkDisplay.begin();
 
   // Initialize display controller (handles application logic)
-  uiManager.begin();
+  uiManager = new UIManager(einkDisplay, sdManager);
+  uiManager->begin();
 
   Serial.println("Initialization complete!\n");
 }
@@ -186,7 +189,8 @@ void loop() {
   }
 
   // Button state is updated by background task
-  uiManager.handleButtons(buttons);
+  if (uiManager)
+    uiManager->handleButtons(buttons);
 
   // Check for power button press to enter sleep
   if (buttons.isPowerButtonDown()) {

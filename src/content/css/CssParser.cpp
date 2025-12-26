@@ -1,5 +1,52 @@
 #include "CssParser.h"
 
+#include <ctype.h>
+
+static float parseSimpleFloat(const char* s, bool* ok) {
+  if (ok)
+    *ok = false;
+  if (!s)
+    return 0.0f;
+
+  while (*s && isspace(static_cast<unsigned char>(*s))) {
+    ++s;
+  }
+
+  bool neg = false;
+  if (*s == '+' || *s == '-') {
+    neg = (*s == '-');
+    ++s;
+  }
+
+  bool any = false;
+  float intPart = 0.0f;
+  while (*s && (*s >= '0' && *s <= '9')) {
+    any = true;
+    intPart = intPart * 10.0f + static_cast<float>(*s - '0');
+    ++s;
+  }
+
+  float fracPart = 0.0f;
+  float scale = 1.0f;
+  if (*s == '.') {
+    ++s;
+    while (*s && (*s >= '0' && *s <= '9')) {
+      any = true;
+      fracPart = fracPart * 10.0f + static_cast<float>(*s - '0');
+      scale *= 10.0f;
+      ++s;
+    }
+  }
+
+  if (!any)
+    return 0.0f;
+  if (ok)
+    *ok = true;
+
+  float v = intPart + (scale > 1.0f ? (fracPart / scale) : 0.0f);
+  return neg ? -v : v;
+}
+
 CssParser::CssParser() {}
 
 CssParser::~CssParser() {}
@@ -301,10 +348,12 @@ void CssParser::parseProperty(const String& name, const String& value, CssStyle&
     }
 
     v.trim();
-    // Attempt to parse float value using C's atof on the c_str
     float indentVal = 0.0f;
     if (v.length() > 0) {
-      indentVal = static_cast<float>(atof(v.c_str())) * factor;
+      bool parsed = false;
+      indentVal = parseSimpleFloat(v.c_str(), &parsed) * factor;
+      if (!parsed)
+        indentVal = 0.0f;
     }
     style.textIndent = indentVal;
     style.hasTextIndent = (indentVal > 0.0f);
@@ -356,12 +405,6 @@ CssFontWeight CssParser::parseFontWeight(const String& value) {
   // Default to normal
   return CssFontWeight::Normal;
 }
-
-// skipWhitespaceAndComments removed (used by parseString which was removed)
-
-// findSelectorEnd removed (used by parseString)
-
-// findRuleEnd removed (used by parseString)
 
 String CssParser::extractClassName(const String& selector) {
   // Find the class selector (starts with '.')
@@ -480,7 +523,10 @@ CssStyle CssParser::parseInlineStyle(const String& styleAttr) const {
           v.trim();
           float indentVal = 0.0f;
           if (v.length() > 0) {
-            indentVal = static_cast<float>(atof(v.c_str())) * factor;
+            bool parsed = false;
+            indentVal = parseSimpleFloat(v.c_str(), &parsed) * factor;
+            if (!parsed)
+              indentVal = 0.0f;
           }
           style.textIndent = indentVal;
           style.hasTextIndent = (indentVal > 0.0f);

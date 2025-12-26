@@ -1,5 +1,6 @@
 #include "UIManager.h"
 
+#include <Arduino.h>
 #include <resources/fonts/FontManager.h>
 
 #include "core/Settings.h"
@@ -12,11 +13,12 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
     : display(display), sdManager(sdManager), textRenderer(display) {
   // Initialize consolidated settings manager
   settings = new Settings(sdManager);
-  // Create concrete screens and store pointers in the map.
-  screens[ScreenId::FileBrowser] =
+  // Create concrete screens and store pointers in the array.
+  screens[toIndex(ScreenId::FileBrowser)] =
       std::unique_ptr<Screen>(new FileBrowserScreen(display, textRenderer, sdManager, *this));
-  screens[ScreenId::ImageViewer] = std::unique_ptr<Screen>(new ImageViewerScreen(display, *this));
-  screens[ScreenId::TextViewer] =
+  screens[toIndex(ScreenId::ImageViewer)] =
+      std::unique_ptr<Screen>(new ImageViewerScreen(display, *this));
+  screens[toIndex(ScreenId::TextViewer)] =
       std::unique_ptr<Screen>(new TextViewerScreen(display, textRenderer, sdManager, *this));
   Serial.printf("[%lu] UIManager: Constructor called\n", millis());
 }
@@ -35,8 +37,8 @@ void UIManager::begin() {
   }
   // Initialize screens using generic Screen interface
   for (auto& p : screens) {
-    if (p.second)
-      p.second->begin();
+    if (p)
+      p->begin();
   }
 
   // Restore last-visible screen (use consolidated settings when available)
@@ -65,7 +67,7 @@ void UIManager::begin() {
 void UIManager::handleButtons(Buttons& buttons) {
   // Pass buttons to the current screen
   // Directly forward to the active screen (must exist)
-  screens[currentScreen]->handleButtons(buttons);
+  screens[toIndex(currentScreen)]->handleButtons(buttons);
 }
 
 void UIManager::showSleepScreen() {
@@ -101,8 +103,8 @@ void UIManager::showSleepScreen() {
 void UIManager::prepareForSleep() {
   // Notify the active screen that the device is powering down so it can
   // persist any state (e.g. current reading position).
-  if (screens[currentScreen])
-    screens[currentScreen]->shutdown();
+  if (screens[toIndex(currentScreen)])
+    screens[toIndex(currentScreen)]->shutdown();
   // Persist which screen was active so we can restore it on next boot.
   if (sdManager.ready() && settings) {
     settings->setInt(String("ui.screen"), static_cast<int>(currentScreen));
@@ -117,7 +119,7 @@ void UIManager::prepareForSleep() {
 void UIManager::openTextFile(const String& sdPath) {
   Serial.printf("UIManager: openTextFile %s\n", sdPath.c_str());
   // Directly access TextViewerScreen and open the file (guaranteed to exist)
-  static_cast<TextViewerScreen*>(screens[ScreenId::TextViewer].get())->openFile(sdPath);
+  static_cast<TextViewerScreen*>(screens[toIndex(ScreenId::TextViewer)].get())->openFile(sdPath);
   showScreen(ScreenId::TextViewer);
 }
 
@@ -127,6 +129,6 @@ void UIManager::showScreen(ScreenId id) {
   // Call activate so screens can perform any work needed when they become
   // active (this also ensures TextViewerScreen::activate is invoked to open
   // any pending file that was loaded during begin()).
-  screens[id]->activate();
-  screens[id]->show();
+  screens[toIndex(id)]->activate();
+  screens[toIndex(id)]->show();
 }

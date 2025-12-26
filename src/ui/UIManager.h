@@ -1,8 +1,9 @@
 #ifndef UI_MANAGER_H
 #define UI_MANAGER_H
 
+#include <Arduino.h>
 #include <memory>
-#include <unordered_map>
+#include <array>
 
 #include "core/Buttons.h"
 #include "core/EInkDisplay.h"
@@ -17,20 +18,18 @@ class FileBrowserScreen;
 class ImageViewerScreen;
 class TextViewerScreen;
 
-// Hash function for enum class
-struct EnumClassHash {
-  template <typename T>
-  std::size_t operator()(T t) const {
-    return static_cast<std::size_t>(t);
-  }
-};
-
 class Settings;
 
 class UIManager {
  public:
   // Typed screen identifiers so callers don't use raw indices
   enum class ScreenId { FileBrowser, ImageViewer, TextViewer };
+
+  static constexpr size_t kScreenCount = 3;
+
+  static constexpr size_t toIndex(ScreenId id) {
+    return static_cast<size_t>(id);
+  }
 
   // Constructor
   UIManager(EInkDisplay& display, class SDCardManager& sdManager);
@@ -55,9 +54,9 @@ class UIManager {
 
   ScreenId currentScreen = ScreenId::FileBrowser;
 
-  // Map holding owning pointers to the screens; screens are
-  // constructed in the .cpp ctor and live for the UIManager lifetime.
-  std::unordered_map<ScreenId, std::unique_ptr<Screen>, EnumClassHash> screens;
+  // Fixed-size owning pointers to screens. Avoids unordered_map/rehash code paths
+  // that can crash on ESP32-C3.
+  std::array<std::unique_ptr<Screen>, kScreenCount> screens;
 
   // Global settings manager (single consolidated settings file)
   class Settings* settings = nullptr;
