@@ -57,5 +57,6 @@ jobs:
           tag_name: ${{ steps.release.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release.outputs.tag }}
-          generate_release_notes: true
+          generate_release_notes: false
+          body_path: Release_guide.md
           prerelease: ${{ steps.release.outputs.prerelease }}
