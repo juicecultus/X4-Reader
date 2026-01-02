@@ -1,0 +1,239 @@
+#include "SettingsScreen.h"
+
+#include <resources/fonts/FontManager.h>
+
+#include "../../core/BatteryMonitor.h"
+#include "../../core/Buttons.h"
+#include "../../core/Settings.h"
+#include "../UIManager.h"
+
+constexpr int SettingsScreen::marginValues[];
+constexpr int SettingsScreen::lineHeightValues[];
+
+SettingsScreen::SettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager)
+    : display(display), textRenderer(renderer), uiManager(uiManager) {}
+
+void SettingsScreen::begin() {
+  loadSettings();
+}
+
+void SettingsScreen::handleButtons(Buttons& buttons) {
+  if (buttons.isPressed(Buttons::BACK)) {
+    saveSettings();
+    // Return to the screen we came from
+    if (previousScreenId == 2) {
+      uiManager.showScreen(UIManager::ScreenId::TextViewer);
+    } else {
+      uiManager.showScreen(UIManager::ScreenId::FileBrowser);
+    }
+  } else if (buttons.isPressed(Buttons::LEFT)) {
+    selectNext();
+  } else if (buttons.isPressed(Buttons::RIGHT)) {
+    selectPrev();
+  } else if (buttons.isPressed(Buttons::CONFIRM)) {
+    toggleCurrentSetting();
+  }
+}
+
+void SettingsScreen::activate() {
+  loadSettings();
+  // Store which screen we came from by checking the current screen in UIManager
+  // We'll assume FileBrowser (0) by default, or TextViewer (2) if a file is open
+  Settings& s = uiManager.getSettings();
+  String lastPath = s.getString(String("textviewer.lastPath"), String(""));
+  previousScreenId = (lastPath.length() > 0) ? 2 : 0;  // 2 = TextViewer, 0 = FileBrowser
+}
+
+void SettingsScreen::show() {
+  renderSettings();
+  display.displayBuffer(EInkDisplay::FAST_REFRESH);
+}
+
+void SettingsScreen::renderSettings() {
+  display.clearScreen(0xFF);
+  textRenderer.setTextColor(TextRenderer::COLOR_BLACK);
+  textRenderer.setFont(getTitleFont());
+
+  // Set framebuffer to BW buffer for rendering
+  textRenderer.setFrameBuffer(display.getFrameBuffer());
+  textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
+
+  // Center the title horizontally
+  {
+    const char* title = "Settings";
+    int16_t x1, y1;
+    uint16_t w, h;
+    textRenderer.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+    int16_t centerX = (480 - (int)w) / 2;
+    textRenderer.setCursor(centerX, 75);
+    textRenderer.print(title);
+  }
+
+  textRenderer.setFont(getMainFont());
+
+  // Render settings list
+  const int lineHeight = 28;
+  int totalHeight = SETTINGS_COUNT * lineHeight;
+  int startY = (800 - totalHeight) / 2;  // center vertically
+
+  for (int i = 0; i < SETTINGS_COUNT; ++i) {
+    String displayName = getSettingName(i);
+    displayName += ": ";
+    displayName += getSettingValue(i);
+
+    if (i == selectedIndex) {
+      displayName = String(">") + displayName + String("<");
+    }
+
+    int16_t x1, y1;
+    uint16_t w, h;
+    textRenderer.getTextBounds(displayName.c_str(), 0, 0, &x1, &y1, &w, &h);
+    int16_t centerX = (480 - (int)w) / 2;
+    int16_t rowY = startY + i * lineHeight;
+    textRenderer.setCursor(centerX, rowY);
+    textRenderer.print(displayName);
+  }
+
+  // Draw battery percentage at bottom
+  {
+    textRenderer.setFont(getMainFont());
+    int pct = g_battery.readPercentage();
+    String pctStr = String(pct) + "%";
+    int16_t bx1, by1;
+    uint16_t bw, bh;
+    textRenderer.getTextBounds(pctStr.c_str(), 0, 0, &bx1, &by1, &bw, &bh);
+    int16_t bx = (480 - (int)bw) / 2;
+    int16_t by = 790;
+    textRenderer.setCursor(bx, by);
+    textRenderer.print(pctStr);
+  }
+}
+
+void SettingsScreen::selectNext() {
+  selectedIndex++;
+  if (selectedIndex >= SETTINGS_COUNT)
+    selectedIndex = 0;
+  show();
+}
+
+void SettingsScreen::selectPrev() {
+  selectedIndex--;
+  if (selectedIndex < 0)
+    selectedIndex = SETTINGS_COUNT - 1;
+  show();
+}
+
+void SettingsScreen::toggleCurrentSetting() {
+  switch (selectedIndex) {
+    case 0:  // Horizontal Margins
+      marginIndex++;
+      if (marginIndex >= marginValuesCount)
+        marginIndex = 0;
+      break;
+    case 1:  // Line Height
+      lineHeightIndex++;
+      if (lineHeightIndex >= lineHeightValuesCount)
+        lineHeightIndex = 0;
+      break;
+    case 2:  // Alignment
+      alignmentIndex++;
+      if (alignmentIndex >= 3)
+        alignmentIndex = 0;
+      break;
+    case 3:  // Show Chapter Numbers
+      showChapterNumbersIndex = 1 - showChapterNumbersIndex;
+      break;
+  }
+  saveSettings();
+  show();
+}
+
+void SettingsScreen::loadSettings() {
+  Settings& s = uiManager.getSettings();
+
+  // Load horizontal margins (applies to both left and right)
+  int margin = 10;
+  if (s.getInt(String("settings.margin"), margin)) {
+    for (int i = 0; i < marginValuesCount; i++) {
+      if (marginValues[i] == margin) {
+        marginIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Load line height
+  int lineHeight = 30;
+  if (s.getInt(String("settings.lineHeight"), lineHeight)) {
+    for (int i = 0; i < lineHeightValuesCount; i++) {
+      if (lineHeightValues[i] == lineHeight) {
+        lineHeightIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Load alignment
+  int alignment = 0;
+  if (s.getInt(String("settings.alignment"), alignment)) {
+    alignmentIndex = alignment;
+  }
+
+  // Load show chapter numbers
+  int showChapters = 1;
+  if (s.getInt(String("settings.showChapterNumbers"), showChapters)) {
+    showChapterNumbersIndex = showChapters;
+  }
+}
+
+void SettingsScreen::saveSettings() {
+  Settings& s = uiManager.getSettings();
+
+  s.setInt(String("settings.margin"), marginValues[marginIndex]);
+  s.setInt(String("settings.lineHeight"), lineHeightValues[lineHeightIndex]);
+  s.setInt(String("settings.alignment"), alignmentIndex);
+  s.setInt(String("settings.showChapterNumbers"), showChapterNumbersIndex);
+
+  if (!s.save()) {
+    Serial.println("SettingsScreen: Failed to write settings.cfg");
+  }
+}
+
+String SettingsScreen::getSettingName(int index) {
+  switch (index) {
+    case 0:
+      return "Margins";
+    case 1:
+      return "Line Height";
+    case 2:
+      return "Alignment";
+    case 3:
+      return "Chapter Numbers";
+    default:
+      return "";
+  }
+}
+
+String SettingsScreen::getSettingValue(int index) {
+  switch (index) {
+    case 0:
+      return String(marginValues[marginIndex]);
+    case 1:
+      return String(lineHeightValues[lineHeightIndex]);
+    case 2:
+      switch (alignmentIndex) {
+        case 0:
+          return "Left";
+        case 1:
+          return "Center";
+        case 2:
+          return "Right";
+        default:
+          return "Unknown";
+      }
+    case 3:
+      return showChapterNumbersIndex ? "On" : "Off";
+    default:
+      return "";
+  }
+}

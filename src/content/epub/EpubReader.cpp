@@ -280,8 +280,13 @@ bool EpubReader::checkAndUpdateExtractMeta() {
           else
             szStr = contents.substring(posSize + 9);
           szStr.trim();
-          metaFileSize = (size_t)szStr.toInt();
-          filesizeMatches = (metaFileSize == epubFileSize_);
+          // Check if string is empty or invalid before parsing
+          if (szStr.length() > 0 && szStr.charAt(0) >= '0' && szStr.charAt(0) <= '9') {
+            metaFileSize = (size_t)szStr.toInt();
+            filesizeMatches = (metaFileSize == epubFileSize_);
+          } else {
+            Serial.println("  Extract meta has invalid 'filesize' value - clearing cache");
+          }
         } else {
           Serial.println("  Extract meta missing 'filesize' entry - clearing cache");
         }

@@ -1,5 +1,6 @@
 
 #include "FileBrowserScreen.h"
+
 #include <resources/fonts/FontManager.h>
 
 #include <algorithm>
@@ -20,7 +21,9 @@ void FileBrowserScreen::begin() {
 
 // Ensure member function is in class scope
 void FileBrowserScreen::handleButtons(Buttons& buttons) {
-  if (buttons.isPressed(Buttons::CONFIRM)) {
+  if (buttons.isPressed(Buttons::BACK)) {
+    uiManager.showScreen(UIManager::ScreenId::Settings);
+  } else if (buttons.isPressed(Buttons::CONFIRM)) {
     confirm();
   } else if (buttons.isPressed(Buttons::LEFT)) {
     selectNext();

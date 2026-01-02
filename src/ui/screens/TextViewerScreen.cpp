@@ -46,65 +46,48 @@ TextViewerScreen::~TextViewerScreen() {
 }
 
 void TextViewerScreen::begin() {
-  // Load persisted viewer settings (last opened file, layout) if present
-  loadSettingsFromFile();
-}
-
-void TextViewerScreen::loadSettingsFromFile() {
-  if (!sdManager.ready())
-    return;
-
-  // Prefer consolidated settings (may have been imported from legacy files)
+  // Load last opened file path if present
   Settings& s = uiManager.getSettings();
-
-  String layoutCsv = s.getString(String("textviewer.layout"), String(""));
-  if (layoutCsv.length() > 0) {
-    // Parse CSV same as legacy format
-    char tmp[256];
-    strncpy(tmp, layoutCsv.c_str(), sizeof(tmp) - 1);
-    tmp[sizeof(tmp) - 1] = '\0';
-    char* tok = strtok(tmp, ",");
-    int values[9];
-    int idx = 0;
-    while (tok && idx < 9) {
-      values[idx++] = atoi(tok);
-      tok = strtok(nullptr, ",");
-    }
-    if (idx >= 1)  // alignment at minimum
-      layoutConfig.alignment = static_cast<LayoutStrategy::TextAlignment>(values[0]);
-  }
-
   String savedPath = s.getString(String("textviewer.lastPath"), String(""));
   if (savedPath.length() > 0) {
     pendingOpenPath = savedPath;
   }
+}
 
-  // Load chapter numbers display setting (default to true)
-  int showChapterNumbersInt = 1;  // Default to true
-  if (s.getInt(String("textviewer.showChapterNumbers"), showChapterNumbersInt)) {
+void TextViewerScreen::loadSettingsFromFile() {
+  // This method now just applies settings from the in-memory Settings object
+  // to the layout config. Settings are loaded from file once at startup by UIManager.
+  Settings& s = uiManager.getSettings();
+
+  // Apply layout config from Settings
+  int margin = 10;
+  if (s.getInt(String("settings.margin"), margin)) {
+    layoutConfig.marginLeft = margin;
+    layoutConfig.marginRight = margin;
+  }
+
+  // Line height = font height (26) + additional spacing from settings
+  int lineSpacing = 4;  // Default spacing
+  if (s.getInt(String("settings.lineHeight"), lineSpacing)) {
+    layoutConfig.lineHeight = 26 + lineSpacing;
+  }
+
+  int alignment = 0;
+  if (s.getInt(String("settings.alignment"), alignment)) {
+    layoutConfig.alignment = static_cast<LayoutStrategy::TextAlignment>(alignment);
+  }
+
+  int showChapterNumbersInt = 1;
+  if (s.getInt(String("settings.showChapterNumbers"), showChapterNumbersInt)) {
     showChapterNumbers = (showChapterNumbersInt != 0);
-  } else {
-    showChapterNumbers = true;  // Default if not found
   }
 }
 
 void TextViewerScreen::saveSettingsToFile() {
-  if (!sdManager.ready())
-    return;
-
+  // Only save the last opened file path
+  // Layout settings are managed by SettingsScreen
   Settings& s = uiManager.getSettings();
   s.setString(String("textviewer.lastPath"), currentFilePath);
-
-  // Second line: comma-separated layout config values (store as CSV)
-  String csv = String(static_cast<int>(layoutConfig.alignment)) + "," + String(layoutConfig.marginLeft) + "," +
-               String(layoutConfig.marginRight) + "," + String(layoutConfig.marginTop) + "," +
-               String(layoutConfig.marginBottom) + "," + String(layoutConfig.lineHeight) + "," +
-               String(layoutConfig.minSpaceWidth) + "," + String(layoutConfig.pageWidth) + "," +
-               String(layoutConfig.pageHeight);
-  s.setString(String("textviewer.layout"), csv);
-
-  // Save chapter numbers display setting
-  s.setInt(String("textviewer.showChapterNumbers"), showChapterNumbers ? 1 : 0);
 
   if (!s.save()) {
     Serial.println("TextViewerScreen: Failed to write settings.cfg");
@@ -132,6 +115,9 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
     savePositionToFile();
     saveSettingsToFile();
     uiManager.showScreen(UIManager::ScreenId::FileBrowser);
+  } else if (buttons.isPressed(Buttons::CONFIRM)) {
+    // Open settings
+    uiManager.showScreen(UIManager::ScreenId::Settings);
   } else if (buttons.isDown(Buttons::LEFT) || buttons.isDown(Buttons::VOLUME_UP)) {
     uint8_t btn = buttons.isDown(Buttons::LEFT) ? Buttons::LEFT : Buttons::VOLUME_UP;
     if (buttons.getHoldDuration(btn) >= LONG_PRESS_MS) {
@@ -166,6 +152,10 @@ void TextViewerScreen::show() {
 
 void TextViewerScreen::showPage() {
   Serial.println("showPage start");
+
+  // Apply current settings from memory to layout config
+  loadSettingsFromFile();
+
   if (!provider) {
     // No provider available (no file open). Show a helpful message instead
     // of returning silently so the user knows why nothing is displayed.
