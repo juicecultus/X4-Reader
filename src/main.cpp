@@ -10,9 +10,9 @@
 #include "core/EInkDisplay.h"
 #include "core/SDCardManager.h"
 #include "rendering/SimpleFont.h"
-#include "resources/fonts/Font14.h"
-#include "resources/fonts/Font27.h"
 #include "resources/fonts/FontDefinitions.h"
+#include "resources/fonts/other/MenuFontSmall.h"
+#include "resources/fonts/other/MenuHeader.h"
 #include "ui/UIManager.h"
 
 // USB detection pin

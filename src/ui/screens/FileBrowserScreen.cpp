@@ -1,7 +1,11 @@
 
 #include "FileBrowserScreen.h"
 
+#include <resources/fonts/FontDefinitions.h>
 #include <resources/fonts/FontManager.h>
+#include <resources/fonts/other/MenuFontBig.h>
+#include <resources/fonts/other/MenuFontSmall.h>
+#include <resources/fonts/other/MenuHeader.h>
 
 #include <algorithm>
 #include <cstring>
@@ -33,6 +37,19 @@ void FileBrowserScreen::handleButtons(Buttons& buttons) {
 }
 
 void FileBrowserScreen::activate() {
+  // Load and apply UI font settings
+  Settings& s = uiManager.getSettings();
+  int uiFontSize = 0;
+  if (s.getInt(String("settings.uiFontSize"), uiFontSize)) {
+    if (uiFontSize == 0) {
+      setMainFont(&MenuFontSmall);
+      setTitleFont(&MenuHeader);
+    } else {
+      setMainFont(&MenuFontBig);
+      setTitleFont(&MenuHeader);
+    }
+  }
+
   loadFolder();
 }
 
@@ -119,7 +136,7 @@ void FileBrowserScreen::renderSdBrowser() {
 
   // Draw battery percentage at bottom-right of the screen
   {
-    textRenderer.setFont(getMainFont());
+    textRenderer.setFont(&MenuFontSmall);  // Always use small font for battery
     int pct = g_battery.readPercentage();
     String pctStr = String(pct) + "%";
     int16_t bx1, by1;

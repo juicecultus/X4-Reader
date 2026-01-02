@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
 
   // Create renderer
   TextRenderer renderer(display);
-  renderer.setFontFamily(&bookerlyFamily);
+  renderer.setFontFamily(&bookerly26Family);
 
   // Run the bidirectional test
   runBidirectionalParagraphTest(runner, display, renderer);

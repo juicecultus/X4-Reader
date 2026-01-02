@@ -1,8 +1,12 @@
 #include "FontManager.h"
-#include "FontDefinitions.h"
 
-// Font family
-static FontFamily* currentFamily = &bookerlyFamily;
+#include "FontDefinitions.h"
+#include "other/MenuFontBig.h"
+#include "other/MenuFontSmall.h"
+#include "other/MenuHeader.h"
+
+// Font family (default to Bookerly26)
+static FontFamily* currentFamily = &bookerly26Family;
 
 FontFamily* getCurrentFontFamily() {
   return currentFamily;
@@ -14,8 +18,8 @@ void setCurrentFontFamily(FontFamily* family) {
 }
 
 // Simple fonts
-static const SimpleGFXfont* mainFont  = &Font14;
-static const SimpleGFXfont* titleFont = &Font27;
+static const SimpleGFXfont* mainFont = &MenuFontSmall;
+static const SimpleGFXfont* titleFont = &MenuHeader;
 
 const SimpleGFXfont* getMainFont() {
   return mainFont;

@@ -1,6 +1,10 @@
 #include "SettingsScreen.h"
 
+#include <resources/fonts/FontDefinitions.h>
 #include <resources/fonts/FontManager.h>
+#include <resources/fonts/other/MenuFontBig.h>
+#include <resources/fonts/other/MenuFontSmall.h>
+#include <resources/fonts/other/MenuHeader.h>
 
 #include "../../core/BatteryMonitor.h"
 #include "../../core/Buttons.h"
@@ -87,7 +91,7 @@ void SettingsScreen::renderSettings() {
 
   // Draw battery percentage at bottom
   {
-    textRenderer.setFont(getMainFont());
+    textRenderer.setFont(&MenuFontSmall);  // Always use small font for battery
     int pct = g_battery.readPercentage();
     String pctStr = String(pct) + "%";
     int16_t bx1, by1;
@@ -134,6 +138,22 @@ void SettingsScreen::toggleCurrentSetting() {
     case 3:  // Show Chapter Numbers
       showChapterNumbersIndex = 1 - showChapterNumbersIndex;
       break;
+    case 4:  // Font Family
+      fontFamilyIndex++;
+      if (fontFamilyIndex >= 2)
+        fontFamilyIndex = 0;
+      applyFontSettings();
+      break;
+    case 5:  // Font Size
+      fontSizeIndex++;
+      if (fontSizeIndex >= 3)
+        fontSizeIndex = 0;
+      applyFontSettings();
+      break;
+    case 6:  // UI Font Size
+      uiFontSizeIndex = 1 - uiFontSizeIndex;
+      applyUIFontSettings();
+      break;
   }
   saveSettings();
   show();
@@ -175,6 +195,28 @@ void SettingsScreen::loadSettings() {
   if (s.getInt(String("settings.showChapterNumbers"), showChapters)) {
     showChapterNumbersIndex = showChapters;
   }
+
+  // Load font family (0=NotoSans, 1=Bookerly)
+  int fontFamily = 1;
+  if (s.getInt(String("settings.fontFamily"), fontFamily)) {
+    fontFamilyIndex = fontFamily;
+  }
+
+  // Load font size (0=Small, 1=Medium, 2=Large)
+  int fontSize = 0;
+  if (s.getInt(String("settings.fontSize"), fontSize)) {
+    fontSizeIndex = fontSize;
+  }
+
+  // Load UI font size (0=Small/14, 1=Large/28)
+  int uiFontSize = 0;
+  if (s.getInt(String("settings.uiFontSize"), uiFontSize)) {
+    uiFontSizeIndex = uiFontSize;
+  }
+
+  // Apply the loaded font settings
+  applyFontSettings();
+  applyUIFontSettings();
 }
 
 void SettingsScreen::saveSettings() {
@@ -184,6 +226,9 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.lineHeight"), lineHeightValues[lineHeightIndex]);
   s.setInt(String("settings.alignment"), alignmentIndex);
   s.setInt(String("settings.showChapterNumbers"), showChapterNumbersIndex);
+  s.setInt(String("settings.fontFamily"), fontFamilyIndex);
+  s.setInt(String("settings.fontSize"), fontSizeIndex);
+  s.setInt(String("settings.uiFontSize"), uiFontSizeIndex);
 
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
@@ -200,6 +245,12 @@ String SettingsScreen::getSettingName(int index) {
       return "Alignment";
     case 3:
       return "Chapter Numbers";
+    case 4:
+      return "Font Family";
+    case 5:
+      return "Font Size";
+    case 6:
+      return "UI Font Size";
     default:
       return "";
   }
@@ -224,7 +275,76 @@ String SettingsScreen::getSettingValue(int index) {
       }
     case 3:
       return showChapterNumbersIndex ? "On" : "Off";
+    case 4:
+      switch (fontFamilyIndex) {
+        case 0:
+          return "NotoSans";
+        case 1:
+          return "Bookerly";
+        default:
+          return "Unknown";
+      }
+    case 5:
+      switch (fontSizeIndex) {
+        case 0:
+          return "Small";
+        case 1:
+          return "Medium";
+        case 2:
+          return "Large";
+        default:
+          return "Unknown";
+      }
+    case 6:
+      return uiFontSizeIndex ? "Large" : "Small";
     default:
       return "";
+  }
+}
+
+void SettingsScreen::applyFontSettings() {
+  // Determine which font family to use based on settings
+  FontFamily* targetFamily = nullptr;
+
+  if (fontFamilyIndex == 0) {  // NotoSans
+    switch (fontSizeIndex) {
+      case 0:
+        targetFamily = &notoSans26Family;
+        break;
+      case 1:
+        targetFamily = &notoSans28Family;
+        break;
+      case 2:
+        targetFamily = &notoSans30Family;
+        break;
+    }
+  } else if (fontFamilyIndex == 1) {  // Bookerly
+    switch (fontSizeIndex) {
+      case 0:
+        targetFamily = &bookerly26Family;
+        break;
+      case 1:
+        targetFamily = &bookerly28Family;
+        break;
+      case 2:
+        targetFamily = &bookerly30Family;
+        break;
+    }
+  }
+
+  if (targetFamily) {
+    setCurrentFontFamily(targetFamily);
+  }
+}
+
+void SettingsScreen::applyUIFontSettings() {
+  // Set main and title fonts for UI elements
+  // Always use MenuHeader for headers/titles
+  setTitleFont(&MenuHeader);
+
+  if (uiFontSizeIndex == 0) {
+    setMainFont(&MenuFontSmall);
+  } else {
+    setMainFont(&MenuFontBig);
   }
 }

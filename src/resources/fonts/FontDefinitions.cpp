@@ -1,39 +1,88 @@
 #include <Arduino.h>
 
-#include "Bookerly26.h"
-#include "Bookerly26Bold.h"
-#include "Bookerly26BoldItalic.h"
-#include "Bookerly26Italic.h"
-#include "Font14.h"
-#include "Font27.h"
-#include "NotoSans26.h"
-#include "NotoSans26Bold.h"
-#include "NotoSans26BoldItalic.h"
-#include "NotoSans26Italic.h"
+// NotoSans fonts
+#include "notosans/NotoSans26.h"
+#include "notosans/NotoSans26Bold.h"
+#include "notosans/NotoSans26BoldItalic.h"
+#include "notosans/NotoSans26Italic.h"
+#include "notosans/NotoSans28.h"
+#include "notosans/NotoSans28Bold.h"
+#include "notosans/NotoSans28BoldItalic.h"
+#include "notosans/NotoSans28Italic.h"
+#include "notosans/NotoSans30.h"
+#include "notosans/NotoSans30Bold.h"
+#include "notosans/NotoSans30BoldItalic.h"
+#include "notosans/NotoSans30Italic.h"
 
-// Font definitions
-const SimpleGFXfont Font14 = {Font14Bitmaps, nullptr, nullptr, Font14Glyphs, 305, 16, "Font14", 14, FontStyle::REGULAR};
-const SimpleGFXfont Font27 = {Font27Bitmaps, nullptr, nullptr, Font27Glyphs, 305, 29, "Font27", 27, FontStyle::REGULAR};
+// Bookerly fonts
+#include "bookerly/Bookerly26.h"
+#include "bookerly/Bookerly26Bold.h"
+#include "bookerly/Bookerly26BoldItalic.h"
+#include "bookerly/Bookerly26Italic.h"
+#include "bookerly/Bookerly28.h"
+#include "bookerly/Bookerly28Bold.h"
+#include "bookerly/Bookerly28BoldItalic.h"
+#include "bookerly/Bookerly28Italic.h"
+#include "bookerly/Bookerly30.h"
+#include "bookerly/Bookerly30Bold.h"
+#include "bookerly/Bookerly30BoldItalic.h"
+#include "bookerly/Bookerly30Italic.h"
+
+// Other fonts
+#include "other/MenuFontBig.h"
+#include "other/MenuFontSmall.h"
+#include "other/MenuHeader.h"
 
 // Font families (group variants together)
-FontFamily notoSansFamily = {
-    "NotoSans",
+FontFamily notoSans26Family = {
+    "NotoSans26",
     &NotoSans26,           // regular
     &NotoSans26Bold,       // bold
     &NotoSans26Italic,     // italic
     &NotoSans26BoldItalic  // boldItalic
 };
 
-FontFamily bookerlyFamily = {
-    "Bookerly",
+FontFamily notoSans28Family = {
+    "NotoSans28",
+    &NotoSans28,           // regular
+    &NotoSans28Bold,       // bold
+    &NotoSans28Italic,     // italic
+    &NotoSans28BoldItalic  // boldItalic
+};
+
+FontFamily notoSans30Family = {
+    "NotoSans30",
+    &NotoSans30,           // regular
+    &NotoSans30Bold,       // bold
+    &NotoSans30Italic,     // italic
+    &NotoSans30BoldItalic  // boldItalic
+};
+
+FontFamily bookerly26Family = {
+    "Bookerly26",
     &Bookerly26,           // regular
     &Bookerly26Bold,       // bold
     &Bookerly26Italic,     // italic
     &Bookerly26BoldItalic  // boldItalic
 };
 
-// Example: Font14 family
-FontFamily font14Family = {"Font14", &Font14, nullptr, nullptr, nullptr};
+FontFamily bookerly28Family = {
+    "Bookerly28",
+    &Bookerly28,           // regular
+    &Bookerly28Bold,       // bold
+    &Bookerly28Italic,     // italic
+    &Bookerly28BoldItalic  // boldItalic
+};
 
-// Example: Font27 family
-FontFamily font27Family = {"Font27", &Font27, nullptr, nullptr, nullptr};
+FontFamily bookerly30Family = {
+    "Bookerly30",
+    &Bookerly30,           // regular
+    &Bookerly30Bold,       // bold
+    &Bookerly30Italic,     // italic
+    &Bookerly30BoldItalic  // boldItalic
+};
+
+// Other fonts
+FontFamily menuFontSmallFamily = {"MenuFontSmall", &MenuFontSmall, nullptr, nullptr, nullptr};
+FontFamily menuHeaderFamily = {"MenuHeader", &MenuHeader, nullptr, nullptr, nullptr};
+FontFamily menuFontBigFamily = {"MenuFontBig", &MenuFontBig, nullptr, nullptr, nullptr};

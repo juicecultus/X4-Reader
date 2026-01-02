@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <resources/fonts/FontDefinitions.h>
 #include <resources/fonts/FontManager.h>
+#include <resources/fonts/other/MenuFontSmall.h>
 
 #include <cstring>
 
@@ -67,10 +68,30 @@ void TextViewerScreen::loadSettingsFromFile() {
     layoutConfig.marginRight = margin;
   }
 
-  // Line height = font height (26) + additional spacing from settings
+  // Load font settings to determine base font height
+  int fontFamily = 1;
+  s.getInt(String("settings.fontFamily"), fontFamily);
+  int fontSize = 0;
+  s.getInt(String("settings.fontSize"), fontSize);
+
+  // Map font size index to actual pixel height: 0=26, 1=28, 2=30
+  int baseFontHeight = 26;
+  switch (fontSize) {
+    case 0:
+      baseFontHeight = 26;
+      break;
+    case 1:
+      baseFontHeight = 28;
+      break;
+    case 2:
+      baseFontHeight = 30;
+      break;
+  }
+
+  // Line height = font height + additional spacing from settings
   int lineSpacing = 4;  // Default spacing
   if (s.getInt(String("settings.lineHeight"), lineSpacing)) {
-    layoutConfig.lineHeight = 26 + lineSpacing;
+    layoutConfig.lineHeight = baseFontHeight + lineSpacing;
   }
 
   int alignment = 0;
@@ -230,7 +251,7 @@ void TextViewerScreen::showPage() {
       }
     }
 
-    textRenderer.setFont(getMainFont());
+    textRenderer.setFont(&MenuFontSmall);  // Always use small font for page indicator
 
     // Build indicator string with chapter info if available
     // Format: "Ch X/Y - Z%" or "ChapterName (X/Y) - Z%" or just "Z%"
@@ -568,7 +589,7 @@ void TextViewerScreen::showErrorMessage(const char* msg) {
   display.clearScreen(0xFF);
 
   textRenderer.setTextColor(TextRenderer::COLOR_BLACK);
-  textRenderer.setFontFamily(&bookerlyFamily);
+  textRenderer.setFontFamily(&bookerly26Family);
   textRenderer.setFontStyle(FontStyle::ITALIC);
 
   int16_t x1, y1;
