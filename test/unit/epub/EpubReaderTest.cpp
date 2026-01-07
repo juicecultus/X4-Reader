@@ -574,7 +574,7 @@ void testCssParsing(TestUtils::TestRunner& runner, EpubReader& reader) {
   }
 
   // Test combining multiple classes
-  CssStyle combinedStyle = cssParser->getCombinedStyle("_0a_GS CharOverride-1");
+  CssStyle combinedStyle = cssParser->getCombinedStyle("p", "_0a_GS CharOverride-1");
   std::cout << "  Combined style for '_0a_GS CharOverride-1':\n";
   std::cout << "    hasTextAlign: " << (combinedStyle.hasTextAlign ? "true" : "false") << "\n";
 
