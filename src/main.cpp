@@ -150,27 +150,34 @@ void setup() {
   Serial.println();
 
   // Initialize buttons
+  Serial.println("Init: Buttons...");
   buttons.begin();
   Serial.println("Buttons initialized");
 
   // Start button update task
+  Serial.println("Init: Button task...");
   xTaskCreate(buttonUpdateTask, "btnUpdate", 2048, &buttons, 1, nullptr);
   Serial.println("Button update task started");
 
   // Initialize SD card manager
+  Serial.println("Init: SD Card...");
   sdManager.begin();
 
-  // Ensure /microreader/ directory exists
+  // Ensure required directories exist
   if (sdManager.ready()) {
     sdManager.ensureDirectoryExists("/microreader");
+    sdManager.ensureDirectoryExists("/books");
   }
+  Serial.println("SD Card initialized");
 
   // Write debug log
   // writeDebugLog();
 
   // Initialize display driver FIRST (allocate frame buffers before EPUB test to avoid fragmentation)
   Serial.printf("Free memory before display init: %d bytes\n", ESP.getFreeHeap());
+  Serial.println("Init: Display...");
   einkDisplay.begin();
+  Serial.println("Display initialized");
 
   // Initialize display controller (handles application logic)
   uiManager = new UIManager(einkDisplay, sdManager);

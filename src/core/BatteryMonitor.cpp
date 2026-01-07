@@ -2,48 +2,34 @@
 #include "BatteryMonitor.h"
 #include "esp_adc_cal.h"
 
-BatteryMonitor::BatteryMonitor(uint8_t adcPin, float dividerMultiplier)
-  : _adcPin(adcPin), _dividerMultiplier(dividerMultiplier)
-{
+BatteryMonitor::BatteryMonitor(uint8_t adcPin, uint16_t dividerMultiplier100)
+    : _adcPin(adcPin), _dividerMultiplier100(dividerMultiplier100) {
 }
 
-uint16_t BatteryMonitor::readPercentage() const
-{
+uint16_t BatteryMonitor::readPercentage() const {
   return percentageFromMillivolts(readMillivolts());
 }
 
-uint16_t BatteryMonitor::readMillivolts() const
-{
+uint16_t BatteryMonitor::readMillivolts() const {
   const uint16_t raw = readRawMillivolts();
   const uint32_t mv = millivoltsFromRawAdc(raw);
-  return static_cast<uint32_t>(mv * _dividerMultiplier);
+  return static_cast<uint16_t>((mv * _dividerMultiplier100) / 100);
 }
 
-uint16_t BatteryMonitor::readRawMillivolts() const
-{
+uint16_t BatteryMonitor::readRawMillivolts() const {
   const uint16_t raw = analogRead(_adcPin);
   return raw;
 }
 
-double BatteryMonitor::readVolts() const
-{
-  return static_cast<double>(readMillivolts()) / 1000.0;
-}
+uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts) {
+  // Use integer-based calculation for battery percentage
+  // V is voltage in millivolts
+  // Typical LiPo range: 4200mV (100%) down to 3300mV (0%)
+  if (millivolts >= 4200) return 100;
+  if (millivolts <= 3300) return 0;
 
-uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts)
-{
-  double volts = millivolts / 1000.0;
-  // Polynomial derived from LiPo samples
-  double y = -144.9390 * volts * volts * volts +
-             1655.8629 * volts * volts -
-             6158.8520 * volts +
-             7501.3202;
-
-  // Clamp to [0,100] and round
-  y = max(y, 0.0);
-  y = min(y, 100.0);
-  y = round(y);
-  return static_cast<int>(y);
+  // Simple linear mapping: (mv - 3300) / (4200 - 3300) * 100
+  return (uint16_t)((millivolts - 3300) * 100 / 900);
 }
 
 uint16_t BatteryMonitor::millivoltsFromRawAdc(uint16_t adc_raw)

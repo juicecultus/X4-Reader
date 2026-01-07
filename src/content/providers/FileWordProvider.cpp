@@ -534,16 +534,16 @@ StyledWord FileWordProvider::scanWord(int direction) {
   }
 }
 
-float FileWordProvider::getPercentage() {
+uint32_t FileWordProvider::getPercentage() {
   if (fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(index_) / static_cast<float>(fileSize_);
+    return 10000;
+  return (uint32_t)((uint64_t)index_ * 10000 / fileSize_);
 }
 
-float FileWordProvider::getPercentage(int index) {
+uint32_t FileWordProvider::getPercentage(int index) {
   if (fileSize_ == 0)
-    return 1.0f;
-  return static_cast<float>(index) / static_cast<float>(fileSize_);
+    return 10000;
+  return (uint32_t)((uint64_t)index * 10000 / fileSize_);
 }
 
 int FileWordProvider::getCurrentIndex() {

@@ -28,10 +28,10 @@ class EpubWordProvider : public WordProvider {
   StyledWord getNextWord() override;
   StyledWord getPrevWord() override;
 
-  float getPercentage() override;
-  float getPercentage(int index) override;
-  float getChapterPercentage() override;
-  float getChapterPercentage(int index) override;
+  uint32_t getPercentage() override;
+  uint32_t getPercentage(int index) override;
+  uint32_t getChapterPercentage() override;
+  uint32_t getChapterPercentage(int index) override;
   void setPosition(int index) override;
   int getCurrentIndex() override;
   char peekChar(int offset = 0) override;

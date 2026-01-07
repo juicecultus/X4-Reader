@@ -10,9 +10,10 @@
 extern unsigned long millis();
 #endif
 
+#include <cstdint>
 #include <algorithm>
-#include <cmath>
 #include <limits>
+#include <vector>
 
 #define DEBUG_LAYOUT
 
@@ -146,21 +147,21 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
 
           // Calculate space to distribute among space words
           int16_t totalSpaceWidth = maxWidth - totalWordWidth;
-          float extraPerSpace = (float)totalSpaceWidth / (float)numSpaceWords;
+          int32_t extraPerSpaceFixed = ((int32_t)totalSpaceWidth << 8) / (int32_t)numSpaceWords;
 
-          if (extraPerSpace > 16 * spaceWidth_) {
+          if (extraPerSpaceFixed > (16 * (int32_t)spaceWidth_ << 8)) {
             // Limit maximum space stretch to avoid extreme gaps
-            extraPerSpace = std::max(extraPerSpace * 0.25f, (float)spaceWidth_);
+            extraPerSpaceFixed = std::max(extraPerSpaceFixed / 4, (int32_t)spaceWidth_ << 8);
           }
 
           // Increase widths of space words
-          float accumulatedExtra = 0.0f;
+          int32_t accumulatedExtraFixed = 0;
           for (auto& w : lineWords) {
             if (w.text == " ") {
-              accumulatedExtra += extraPerSpace;
-              int16_t extra = (int16_t)accumulatedExtra;
+              accumulatedExtraFixed += extraPerSpaceFixed;
+              int16_t extra = (int16_t)(accumulatedExtraFixed >> 8);
               w.width += extra;
-              accumulatedExtra -= extra;
+              accumulatedExtraFixed -= ((int32_t)extra << 8);
             }
           }
 
@@ -213,11 +214,11 @@ std::vector<size_t> KnuthPlassLayoutStrategy::calculateBreaks(const std::vector<
   size_t n = words.size();
 
   // Dynamic programming array: minimum demerits to reach each word
-  std::vector<float> minDemerits(n + 1, INFINITY_PENALTY);
+  std::vector<int32_t> minDemerits(n + 1, INFINITY_PENALTY);
   std::vector<int> prevBreak(n + 1, -1);
 
   // Base case: starting position has 0 demerits
-  minDemerits[0] = 0.0f;
+  minDemerits[0] = 0;
 
   // For each possible starting position
   for (size_t i = 0; i < n; i++) {
@@ -237,12 +238,12 @@ std::vector<size_t> KnuthPlassLayoutStrategy::calculateBreaks(const std::vector<
         if (j == i) {
           // Force this oversized word onto its own line with a high but not infinite penalty
           // Use a large fixed penalty (100) rather than INFINITY_PENALTY to allow progress
-          float demerits = 100.0f;
+          int32_t demerits = 100;
 
           // Add a constant penalty per line to favor fewer lines
-          demerits += 50.0f;
+          demerits += 50;
 
-          float totalDemerits = minDemerits[i] + demerits;
+          int32_t totalDemerits = minDemerits[i] + demerits;
           if (totalDemerits < minDemerits[j + 1]) {
             minDemerits[j + 1] = totalDemerits;
             prevBreak[j + 1] = i;
@@ -253,15 +254,15 @@ std::vector<size_t> KnuthPlassLayoutStrategy::calculateBreaks(const std::vector<
 
       // Calculate badness and demerits for this line
       bool isLastLine = (j == n - 1);
-      float badness = calculateBadness(lineWidth, maxWidth);
-      float demerits = calculateDemerits(badness, isLastLine);
+      int32_t badness = calculateBadness(lineWidth, maxWidth);
+      int32_t demerits = calculateDemerits(badness, isLastLine);
 
       // Add a constant penalty per line to favor fewer lines
       // This makes layouts with fewer lines always preferable
-      demerits += 50.0f;
+      demerits += 50;
 
       // Update minimum demerits to reach position j+1
-      float totalDemerits = minDemerits[i] + demerits;
+      int32_t totalDemerits = minDemerits[i] + demerits;
       if (totalDemerits < minDemerits[j + 1]) {
         minDemerits[j + 1] = totalDemerits;
         prevBreak[j + 1] = i;
@@ -292,7 +293,7 @@ std::vector<size_t> KnuthPlassLayoutStrategy::calculateBreaks(const std::vector<
   return breaks;
 }
 
-float KnuthPlassLayoutStrategy::calculateBadness(int16_t actualWidth, int16_t targetWidth) {
+int32_t KnuthPlassLayoutStrategy::calculateBadness(int16_t actualWidth, int16_t targetWidth) {
   if (actualWidth > targetWidth) {
     // Line is too wide - very bad
     return INFINITY_PENALTY;
@@ -300,31 +301,34 @@ float KnuthPlassLayoutStrategy::calculateBadness(int16_t actualWidth, int16_t ta
 
   if (actualWidth == targetWidth) {
     // Perfect fit
-    return 0.0f;
+    return 0;
   }
 
   // Calculate adjustment ratio (how much space needs to be stretched)
-  float ratio = (float)(targetWidth - actualWidth) / (float)targetWidth;
+  // Scaling by 100 for integer precision
+  int32_t diff = (int32_t)(targetWidth - actualWidth);
+  int32_t ratio = (diff * 100) / targetWidth;
 
   // Badness is cube of ratio (Knuth-Plass formula)
   // This penalizes very loose lines more heavily
-  float badness = ratio * ratio * ratio * 100.0f;
+  int32_t badness = (ratio * ratio * ratio) / 100;
 
   return badness;
 }
 
-float KnuthPlassLayoutStrategy::calculateDemerits(float badness, bool isLastLine) {
+int32_t KnuthPlassLayoutStrategy::calculateDemerits(int32_t badness, bool isLastLine) {
   if (badness >= INFINITY_PENALTY) {
     return INFINITY_PENALTY;
   }
 
   // Last line is allowed to be loose without penalty
   if (isLastLine) {
-    return 0.0f;
+    return 0;
   }
 
   // Demerits is square of (1 + badness)
-  float demerits = (1.0f + badness) * (1.0f + badness);
+  int32_t val = (1 + badness);
+  int32_t demerits = val * val;
 
   return demerits;
 }

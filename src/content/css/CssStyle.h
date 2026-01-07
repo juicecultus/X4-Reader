@@ -55,8 +55,8 @@ struct CssStyle {
   CssFontWeight fontWeight = CssFontWeight::Normal;
   bool hasFontWeight = false;  // True if font-weight was explicitly set
 
-  // Text-indent support (in CSS units, stored here as pixels approximation)
-  float textIndent = 0.0f;
+  // Text-indent support (in pixels)
+  int16_t textIndent = 0;
   bool hasTextIndent = false;
 
   // Merge another style into this one (other style takes precedence)

@@ -45,23 +45,23 @@ class KnuthPlassLayoutStrategy : public LayoutStrategy {
   };
 
   // Knuth-Plass parameters
-  static constexpr float INFINITY_PENALTY = 10000.0f;
-  static constexpr float HYPHEN_PENALTY = 50.0f;
-  static constexpr float FITNESS_DEMERITS = 100.0f;
+  static constexpr int32_t INFINITY_PENALTY = 1000000;
+  static constexpr int32_t HYPHEN_PENALTY = 50;
+  static constexpr int32_t FITNESS_DEMERITS = 100;
 
   // Node for dynamic programming
   struct Node {
-    size_t position;      // Word index
-    size_t line;          // Line number
-    float totalDemerits;  // Total demerits up to this point
-    int16_t totalWidth;   // Width accumulated up to this position
-    int prevBreak;        // Previous break point index (-1 if none)
+    size_t position;         // Word index
+    size_t line;             // Line number
+    int32_t totalDemerits;   // Total demerits up to this point
+    int16_t totalWidth;      // Width accumulated up to this position
+    int prevBreak;           // Previous break point index (-1 if none)
   };
 
   // Helper methods
   std::vector<size_t> calculateBreaks(const std::vector<Word>& words, int16_t maxWidth);
-  float calculateBadness(int16_t actualWidth, int16_t targetWidth);
-  float calculateDemerits(float badness, bool isLastLine);
+  int32_t calculateBadness(int16_t actualWidth, int16_t targetWidth);
+  int32_t calculateDemerits(int32_t badness, bool isLastLine);
 
   // Line count mismatch tracking for testing
   bool lineCountMismatch_ = false;

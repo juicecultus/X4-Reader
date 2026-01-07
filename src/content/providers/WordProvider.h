@@ -42,16 +42,16 @@ class WordProvider {
   // Gets the previous word as a StyledWord and moves index backwards
   virtual StyledWord getPrevWord() = 0;
 
-  // Returns the current reading progress as a percentage (0.0 to 1.0)
-  virtual float getPercentage() = 0;
-  virtual float getPercentage(int index) = 0;
+  // Returns the current reading progress as a percentage (0 to 10000)
+  virtual uint32_t getPercentage() = 0;
+  virtual uint32_t getPercentage(int index) = 0;
 
-  // Returns the current chapter progress as a percentage (0.0 to 1.0)
+  // Returns the current chapter progress as a percentage (0 to 10000)
   // For single-file providers, this is the same as getPercentage()
-  virtual float getChapterPercentage() {
+  virtual uint32_t getChapterPercentage() {
     return getPercentage();
   }
-  virtual float getChapterPercentage(int index) {
+  virtual uint32_t getChapterPercentage(int index) {
     return getPercentage(index);
   }
 

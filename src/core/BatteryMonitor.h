@@ -6,7 +6,7 @@
 class BatteryMonitor {
  public:
   // Optional divider multiplier parameter defaults to 2.0
-  explicit BatteryMonitor(uint8_t adcPin, float dividerMultiplier = 2.0f);
+  explicit BatteryMonitor(uint8_t adcPin, uint16_t dividerMultiplier100 = 200);
 
   // Read voltage and return percentage (0-100)
   uint16_t readPercentage() const;
@@ -17,9 +17,6 @@ class BatteryMonitor {
   // Read raw millivolts from ADC (doesn't account for divider)
   uint16_t readRawMillivolts() const;
 
-  // Read the battery voltage in volts (accounts for divider)
-  double readVolts() const;
-
   // Percentage (0-100) from a millivolt value
   static uint16_t percentageFromMillivolts(uint16_t millivolts);
 
@@ -28,7 +25,7 @@ class BatteryMonitor {
 
  private:
   uint8_t _adcPin;
-  float _dividerMultiplier;
+  uint16_t _dividerMultiplier100;
 };
 
 // Global battery monitor instance (define in one translation unit, e.g. `main.cpp`)

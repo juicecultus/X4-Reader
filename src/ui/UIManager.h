@@ -2,8 +2,8 @@
 #define UI_MANAGER_H
 
 #include <Arduino.h>
+#include <map>
 #include <memory>
-#include <array>
 
 #include "core/Buttons.h"
 #include "core/EInkDisplay.h"
@@ -56,9 +56,9 @@ class UIManager {
   ScreenId currentScreen = ScreenId::FileBrowser;
   ScreenId previousScreen = ScreenId::FileBrowser;
 
-  // Fixed-size owning pointers to screens. Avoids unordered_map/rehash code paths
-  // that can crash on ESP32-C3.
-  std::array<std::unique_ptr<Screen>, kScreenCount> screens;
+  // Map holding owning pointers to the screens; screens are
+  // constructed in the .cpp ctor and live for the UIManager lifetime.
+  std::map<ScreenId, std::unique_ptr<Screen>> screens;
 
   // Global settings manager (single consolidated settings file)
   class Settings* settings = nullptr;

@@ -93,8 +93,8 @@ class LayoutStrategy {
                                    int currentEndPosition);
 
   // Optional lower-level methods for strategies that need them
-  virtual void setSpaceWidth(float spaceWidth) {
-    spaceWidth_ = static_cast<int16_t>(spaceWidth);
+  virtual void setSpaceWidth(int16_t spaceWidth) {
+    spaceWidth_ = spaceWidth;
   }
   virtual int16_t layoutAndRender(const std::vector<Word>& words, TextRenderer& renderer, int16_t x, int16_t y,
                                   int16_t maxWidth, int16_t lineHeight, int16_t maxY) {

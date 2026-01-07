@@ -11,7 +11,7 @@
 #include <Arduino.h>
 #endif
 
-#include <cmath>
+#include <cstdint>
 
 LayoutStrategy::LayoutStrategy() : hyphenationStrategy_(new NoHyphenation()) {}
 
@@ -233,7 +233,7 @@ int LayoutStrategy::getPreviousPageStart(WordProvider& provider, TextRenderer& r
     Line line = getPrevLine(provider, renderer, maxWidth, isParagraphEnd, config.alignment);
 
     // Stop if we hit a paragraph break and have gone back enough
-    if (isParagraphEnd && linesBack >= maxLines * 1.25) {
+    if (isParagraphEnd && linesBack >= (maxLines * 5) / 4) {
       break;
     }
   }

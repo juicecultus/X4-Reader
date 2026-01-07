@@ -10,7 +10,7 @@
 #ifndef ARDUINO
 #include "platform_stubs.h"
 #endif
-#include <cmath>
+#include <cstdint>
 
 GreedyLayoutStrategy::GreedyLayoutStrategy() {}
 

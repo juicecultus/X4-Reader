@@ -53,25 +53,30 @@ std::vector<String> SDCardManager::listFiles(const char* path, int maxFiles) {
 
   File root = SD.open(path);
   if (!root) {
-    Serial.println("Failed to open directory.");
+    Serial.printf("SDCardManager: Failed to open directory: %s\n", path);
     return ret;
   }
   if (!root.isDirectory()) {
-    Serial.println("Path is not a directory.");
+    Serial.printf("SDCardManager: Path is not a directory: %s\n", path);
     root.close();
     return ret;
   }
 
+  Serial.printf("SDCardManager: Scanning directory: %s\n", path);
   int count = 0;
   for (File f = root.openNextFile(); f && count < maxFiles; f = root.openNextFile()) {
     if (f.isDirectory()) {
+      Serial.printf("  [DIR]  %s\n", f.name());
       f.close();
       continue;
     }
-    ret.push_back(String(f.name()));
+    String fname = String(f.name());
+    Serial.printf("  [FILE] %s\n", fname.c_str());
+    ret.push_back(fname);
     f.close();
     count++;
   }
+  Serial.printf("SDCardManager: Found %d total files/dirs\n", count);
   root.close();
   return ret;
 }

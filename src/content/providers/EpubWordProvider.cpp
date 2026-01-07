@@ -4,6 +4,7 @@
 #include <SD.h>
 #include <ctype.h>
 
+#include <cstdint>
 #include <vector>
 
 // #define EPUB_DEBUG_CLEAN_CACHE
@@ -299,7 +300,7 @@ void EpubWordProvider::writeParagraphStyleToken(String& writeBuffer, const Strin
     paragraphClassesWritten = true;
 
     // If the combined paragraph style specifies a positive text-indent value,
-    // convert it to a number of spaces using a simple heuristic: spaces = round(px / 4),
+    // convert it to a number of spaces using a simple heuristic: spaces = (px + 2) / 4,
     // clamped to [0, 12]. This maps typical indents to visible space counts while
     // avoiding huge or tiny counts.
     if (combined.hasTextIndent && combined.textIndent > 0.0f) {
@@ -1124,46 +1125,46 @@ StyledWord EpubWordProvider::getPrevWord() {
   return fileProvider_->getPrevWord();
 }
 
-float EpubWordProvider::getPercentage() {
+uint32_t EpubWordProvider::getPercentage() {
   if (!fileProvider_)
-    return 1.0f;
+    return 10000;
   // For EPUBs, calculate book-wide percentage using chapter offset
   if (isEpub_ && epubReader_) {
     size_t totalSize = epubReader_->getTotalBookSize();
-    if (totalSize == 0)
-      return 1.0f;
-    size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
-    size_t positionInChapter = static_cast<size_t>(fileProvider_->getCurrentIndex());
-    size_t absolutePosition = chapterOffset + positionInChapter;
-    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
+    if (totalSize > 0) {
+      size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
+      size_t positionInChapter = static_cast<size_t>(fileProvider_->getCurrentIndex());
+      size_t absolutePosition = chapterOffset + positionInChapter;
+      return (uint32_t)((uint64_t)absolutePosition * 10000 / totalSize);
+    }
   }
   // Non-EPUB: delegate to file provider percentage
   return fileProvider_->getPercentage();
 }
 
-float EpubWordProvider::getPercentage(int index) {
+uint32_t EpubWordProvider::getPercentage(int index) {
   if (!fileProvider_)
-    return 1.0f;
+    return 10000;
   if (isEpub_ && epubReader_) {
     size_t totalSize = epubReader_->getTotalBookSize();
     if (totalSize == 0)
-      return 1.0f;
+      return 10000;
     size_t chapterOffset = epubReader_->getSpineItemOffset(currentChapter_);
     size_t absolutePosition = chapterOffset + static_cast<size_t>(index);
-    return static_cast<float>(absolutePosition) / static_cast<float>(totalSize);
+    return (uint32_t)((uint64_t)absolutePosition * 10000 / totalSize);
   }
   return fileProvider_->getPercentage(index);
 }
 
-float EpubWordProvider::getChapterPercentage() {
+uint32_t EpubWordProvider::getChapterPercentage() {
   if (!fileProvider_)
-    return 1.0f;
+    return 10000;
   return fileProvider_->getPercentage();
 }
 
-float EpubWordProvider::getChapterPercentage(int index) {
+uint32_t EpubWordProvider::getChapterPercentage(int index) {
   if (!fileProvider_)
-    return 1.0f;
+    return 10000;
   return fileProvider_->getPercentage(index);
 }
 

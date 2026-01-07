@@ -81,16 +81,16 @@ StyledWord StringWordProvider::scanWord(int direction) {
   }
 }
 
-float StringWordProvider::getPercentage() {
+uint32_t StringWordProvider::getPercentage() {
   if (text_.length() == 0)
-    return 1.0f;
-  return static_cast<float>(index_) / static_cast<float>(text_.length());
+    return 10000;
+  return (uint32_t)((uint64_t)index_ * 10000 / text_.length());
 }
 
-float StringWordProvider::getPercentage(int index) {
+uint32_t StringWordProvider::getPercentage(int index) {
   if (text_.length() == 0)
-    return 1.0f;
-  return static_cast<float>(index) / static_cast<float>(text_.length());
+    return 10000;
+  return (uint32_t)((uint64_t)index * 10000 / text_.length());
 }
 
 int StringWordProvider::getCurrentIndex() {

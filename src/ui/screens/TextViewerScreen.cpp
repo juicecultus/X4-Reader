@@ -239,11 +239,11 @@ void TextViewerScreen::showPage() {
 
     // Use book-wide percentage for display
     // If at end of chapter and it's the last chapter, show 100%
-    float pagePercentage = provider->getPercentage();
-    if (provider->getChapterPercentage(pageEndIndex) >= 1.0f) {
+    uint32_t pagePercentage = provider->getPercentage();
+    if (provider->getChapterPercentage(pageEndIndex) >= 10000) {
       // At end of current chapter - check if it's the last chapter
       if (!provider->hasChapters() || provider->getCurrentChapter() >= provider->getChapterCount() - 1) {
-        pagePercentage = 1.0f;
+        pagePercentage = 10000;
       }
     }
 
@@ -272,7 +272,7 @@ void TextViewerScreen::showPage() {
         indicator = "Ch " + String(currentCh) + "/" + String(totalCh) + " - ";
       }
     }
-    indicator += String((int)(pagePercentage * 100)) + "%";
+    indicator += String(pagePercentage / 100) + "%";
 
     int16_t x1, y1;
     uint16_t w, h;
@@ -320,7 +320,7 @@ void TextViewerScreen::nextPage() {
     return;
 
   // Check if there are more words in current chapter (use chapter percentage, not book percentage)
-  if (provider->getChapterPercentage(pageEndIndex) < 1.0f) {
+  if (provider->getChapterPercentage(pageEndIndex) < 10000) {
     provider->setPosition(pageEndIndex);
     showPage();
   } else {

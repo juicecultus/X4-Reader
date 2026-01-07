@@ -338,10 +338,9 @@ void CssParser::parseProperty(const String& name, const String& value, CssStyle&
     v.toLowerCase();
 
     // Default unit: pixels. For 'em' convert to px assuming 16px per em.
-    float factor = 1.0f;
-    // endsWith / toFloat may not be available on all String implementations
+    int16_t factor = 1;
     if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
-      factor = 16.0f;
+      factor = 16;
       v = v.substring(0, v.length() - 2);
     } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("px")) {
       v = v.substring(0, v.length() - 2);
@@ -355,8 +354,9 @@ void CssParser::parseProperty(const String& name, const String& value, CssStyle&
       if (!parsed)
         indentVal = 0.0f;
     }
+    }
     style.textIndent = indentVal;
-    style.hasTextIndent = (indentVal > 0.0f);
+    style.hasTextIndent = (indentVal > 0);
   }
   // Add more property parsing here as needed
 }
@@ -513,9 +513,9 @@ CssStyle CssParser::parseInlineStyle(const String& styleAttr) const {
           v.trim();
           v.toLowerCase();
 
-          float factor = 1.0f;
+          int16_t factor = 1;
           if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
-            factor = 16.0f;
+            factor = 16;
             v = v.substring(0, v.length() - 2);
           } else if (v.length() >= 2 && v.substring(v.length() - 2) == String("px")) {
             v = v.substring(0, v.length() - 2);
@@ -529,7 +529,7 @@ CssStyle CssParser::parseInlineStyle(const String& styleAttr) const {
               indentVal = 0.0f;
           }
           style.textIndent = indentVal;
-          style.hasTextIndent = (indentVal > 0.0f);
+          style.hasTextIndent = (indentVal > 0);
         }
       }
     }

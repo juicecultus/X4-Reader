@@ -101,11 +101,17 @@ void FileBrowserScreen::renderSdBrowser() {
 
   for (int i = 0; i < drawable; ++i) {
     int idx = sdScrollOffset + i;
-    String name = sdFiles[idx];
+    String fullPath = sdFiles[idx];
+    String filename = fullPath;
+    int lastSlash = fullPath.lastIndexOf('/');
+    if (lastSlash != -1) {
+      filename = fullPath.substring(lastSlash + 1);
+    }
+
     // For display, strip the .txt extension if present but keep the stored
     // filename intact so confirm() can open it later.
     // For .epub files, keep the extension visible.
-    String displayNameRaw = name;
+    String displayNameRaw = filename;
     if (displayNameRaw.length() >= 4) {
       String ext = displayNameRaw.substring(displayNameRaw.length() - 4);
       ext.toLowerCase();
@@ -152,19 +158,7 @@ void FileBrowserScreen::renderSdBrowser() {
 
 void FileBrowserScreen::confirm() {
   if (!sdFiles.empty()) {
-    String filename = sdFiles[sdSelectedIndex];
-    String fullPath;
-    // SD.openNextFile() name format varies by core; it may be either basename
-    // ("foo.epub") or include path ("/books/foo.epub" or "books/foo.epub").
-    if (filename.startsWith("/")) {
-      fullPath = filename;
-    } else if (filename.indexOf('/') >= 0) {
-      fullPath = String("/") + filename;
-    } else if (browsePath == "/" || browsePath.length() == 0) {
-      fullPath = String("/") + filename;
-    } else {
-      fullPath = browsePath + String("/") + filename;
-    }
+    String fullPath = sdFiles[sdSelectedIndex];
     Serial.printf("Selected file: %s\n", fullPath.c_str());
 
     // Ask UI manager to open the selected file in the text viewer
@@ -225,27 +219,28 @@ void FileBrowserScreen::loadFolder(int maxFiles) {
     return;
   }
 
-  // Default to /books when present, otherwise fall back to root.
-  // This keeps the UX simple while allowing users to keep books organized.
-  browsePath = sdManager.isDirectory("/books") ? String("/books") : String("/");
-
-  auto files = sdManager.listFiles(browsePath.c_str(), maxFiles);
-  for (auto& name : files) {
-    // Include .txt and .epub files (case-insensitive)
-    if (name.length() >= 4) {
-      String ext = name.substring(name.length() - 4);
-      ext.toLowerCase();
-      if (ext == String(".txt")) {
-        sdFiles.push_back(name);
-        continue;  // Avoid checking for .epub if we already matched .txt
+  // Scan both directories
+  const char* dirs[] = {"/microreader", "/books"};
+  for (const char* dir : dirs) {
+    auto files = sdManager.listFiles(dir, maxFiles);
+    Serial.printf("FileBrowserScreen: Found %d files in %s\n", (int)files.size(), dir);
+    for (auto& name : files) {
+      String fullPath = String(dir) + "/" + name;
+      // Include .txt and .epub files (case-insensitive)
+      if (name.length() >= 4) {
+        String ext = name.substring(name.length() - 4);
+        ext.toLowerCase();
+        if (ext == String(".txt")) {
+          sdFiles.push_back(fullPath);
+          continue;
+        }
       }
-    }
-    // Check for .epub extension (5 characters)
-    if (name.length() >= 5) {
-      String ext = name.substring(name.length() - 5);
-      ext.toLowerCase();
-      if (ext == String(".epub")) {
-        sdFiles.push_back(name);
+      if (name.length() >= 5) {
+        String ext = name.substring(name.length() - 5);
+        ext.toLowerCase();
+        if (ext == String(".epub")) {
+          sdFiles.push_back(fullPath);
+        }
       }
     }
   }
