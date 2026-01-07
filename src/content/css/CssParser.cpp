@@ -392,7 +392,8 @@ int CssParser::parseMargin(const String& value) const {
   int newLines = 0;
 
   if (v.length() >= 2 && v.substring(v.length() - 2) == String("em")) {
-    // incredibly primitive implementation where 1em == 1 new line
+    // 1em == 1 new line, flooring any fractions.
+    // todo: consider limiting number of new lines allowed, because the gaps can get a bit silly with some ePubs!
     v = v.substring(0, v.length() - 2);
     newLines = static_cast<int>(std::floor(atof(v.c_str())));
   }
