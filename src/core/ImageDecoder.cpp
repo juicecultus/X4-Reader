@@ -151,31 +151,30 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
-        // Strict hardware boundary check
+        // Hardware boundary check
         if (targetY < 0 || targetY >= 480) continue;
 
-        const uint16_t* pSrcRow = &pDraw->pPixels[y * pDraw->iWidth];
+        // Safer pointer arithmetic
+        const uint16_t* pSrcRow = pDraw->pPixels + (y * pDraw->iWidth);
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
-            // Strict hardware boundary check
+            // Hardware boundary check
             if (targetX < 0 || targetX >= 800) continue;
 
             uint16_t pixel = pSrcRow[x];
-            // Extract RGB565 components
+            // RGB565 extraction
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
-            // Integer-only luminance calculation (0-255 scale)
+            // Integer luminance: (R*306 + G*601 + B*117) >> 10
             uint32_t r8 = (r * 255) / 31;
             uint32_t g8 = (g * 255) / 63;
             uint32_t b8 = (b * 255) / 31;
             uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
             
-            // SSD1677: 0=black, 1=white (BBEPAPER mapping)
-            uint8_t color = (lum < 128) ? 0 : 1;
-            ctx->bbep->drawPixel(targetX, targetY, color);
+            ctx->bbep->drawPixel(targetX, targetY, (lum < 128) ? 0 : 1);
         }
     }
     return 1;
