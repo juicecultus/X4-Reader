@@ -117,7 +117,7 @@ void UIManager::showSleepScreen() {
       
       // decodeToDisplay writes directly to the buffer we pass it.
       // We pass the current back buffer (which display.getFrameBuffer() returns).
-      if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
+      if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
         usedRandomCover = true;
       } else {
         Serial.println("Failed to decode random sleep cover");
@@ -133,10 +133,13 @@ void UIManager::showSleepScreen() {
   // TEST: Draw a small black rectangle in the center to verify FB access
   uint8_t* fb = display.getFrameBuffer();
   if (fb) {
-    for (int ty = 200; ty < 240; ty++) {
-      for (int tx = 380; tx < 420; tx++) {
-        int bIdx = (ty * 100) + (tx / 8);
-        int bit = 7 - (tx % 8);
+    // Draw in portrait logical coordinates, then map to the 800x480 framebuffer.
+    for (int py = 300; py < 340; py++) {
+      for (int px = 220; px < 260; px++) {
+        int fx = py;            // x_fb = y_portrait
+        int fy = 479 - px;      // y_fb = (480-1) - x_portrait
+        int bIdx = (fy * 100) + (fx / 8);
+        int bit = 7 - (fx % 8);
         fb[bIdx] &= ~(1 << bit); // Black
       }
     }

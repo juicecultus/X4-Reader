@@ -174,15 +174,24 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     // NOTE: JPEGDEC invokes this callback in MCU blocks, not strict scanlines.
     // Error-diffusion dithering assumes left-to-right row order and causes heavy
     // streaking/corruption when applied to block callbacks. Use simple thresholding.
+    // Framebuffer is 800x480 (landscape). UI is portrait logical 480x800.
+    // Map portrait (px, py) -> framebuffer (fx, fy) as:
+    //   fx = py
+    //   fy = 479 - px
+    // This matches EInkDisplay::saveFrameBufferAsPBM() rotation.
     for (int y = 0; y < pDraw->iHeight; y++) {
-        int targetY = pDraw->y + y;
-        if (targetY < 0 || targetY >= 480) continue;
+        int py = pDraw->y + y;
+        if (py < 0 || py >= (int)ctx->targetHeight) continue;
 
         const uint16_t* pSrcRow = pDraw->pPixels + (y * pDraw->iWidth);
 
         for (int x = 0; x < pDraw->iWidth; x++) {
-            int targetX = pDraw->x + x;
-            if (targetX < 0 || targetX >= 800) continue;
+            int px = pDraw->x + x;
+            if (px < 0 || px >= (int)ctx->targetWidth) continue;
+
+            const int fx = py;
+            const int fy = 479 - px;
+            if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
 
             uint16_t pixel = pSrcRow[x];
             uint8_t r = (pixel >> 11) & 0x1F;
@@ -197,15 +206,15 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             uint8_t color = (lum < 128) ? 0 : 1;
 
             if (ctx->frameBuffer) {
-                int byteIdx = (targetY * 100) + (targetX / 8);
-                int bitIdx = 7 - (targetX % 8);
+                int byteIdx = (fy * 100) + (fx / 8);
+                int bitIdx = 7 - (fx % 8);
                 if (color == 0) {
                     ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
                 } else {
                     ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
                 }
             } else {
-                ctx->bbep->drawPixel(targetX, targetY, color);
+                ctx->bbep->drawPixel(fx, fy, color);
             }
         }
     }
@@ -223,21 +232,26 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     
     currentPNG->getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
-    int targetY = pDraw->y + ctx->offsetY;
-    if (targetY < 0 || targetY >= 480) {
+    int py = pDraw->y + ctx->offsetY;
+    if (py < 0 || py >= (int)ctx->targetHeight) {
         free(usPixels);
         return;
     }
 
-    int16_t* curErr = &ctx->errorBuf[(targetY % 2) * 800];
-    int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * 800];
-    if (targetY < 479) {
-        memset(nxtErr, 0, 800 * sizeof(int16_t));
+    const int w = (int)ctx->targetWidth;
+    int16_t* curErr = &ctx->errorBuf[(py % 2) * w];
+    int16_t* nxtErr = &ctx->errorBuf[((py + 1) % 2) * w];
+    if (py + 1 < (int)ctx->targetHeight) {
+        memset(nxtErr, 0, (size_t)w * sizeof(int16_t));
     }
 
     for (int x = 0; x < pDraw->iWidth; x++) {
-        int targetX = x + ctx->offsetX;
-        if (targetX < 0 || targetX >= 800) continue;
+        int px = x + ctx->offsetX;
+        if (px < 0 || px >= (int)ctx->targetWidth) continue;
+
+        const int fx = py;
+        const int fy = 479 - px;
+        if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
 
         uint16_t pixel = usPixels[x];
         uint8_t r = (pixel >> 11) & 0x1F; 
@@ -249,30 +263,30 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         uint32_t b8 = (b * 255) / 31;
         uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
 
-        int16_t gray = (int16_t)lum + curErr[targetX];
+        int16_t gray = (int16_t)lum + curErr[px];
         if (gray < 0) gray = 0;
         else if (gray > 255) gray = 255;
 
         uint8_t color = (gray < 128) ? 0 : 1;
         
         if (ctx->frameBuffer) {
-            int byteIdx = (targetY * 100) + (targetX / 8);
-            int bitIdx = 7 - (targetX % 8);
+            int byteIdx = (fy * 100) + (fx / 8);
+            int bitIdx = 7 - (fx % 8);
             if (color == 0) {
                 ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
             } else {
                 ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
             }
         } else {
-            ctx->bbep->drawPixel(targetX, targetY, color);
+            ctx->bbep->drawPixel(fx, fy, color);
         }
 
         int16_t err = gray - (color ? 255 : 0);
-        if (targetX + 1 < 800) curErr[targetX + 1] += (err * 7) / 16;
-        if (targetY + 1 < 480) {
-            if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
-            nxtErr[targetX] += (err * 5) / 16;
-            if (targetX + 1 < 800) nxtErr[targetX + 1] += (err * 1) / 16;
+        if (px + 1 < w) curErr[px + 1] += (err * 7) / 16;
+        if (py + 1 < (int)ctx->targetHeight) {
+            if (px > 0) nxtErr[px - 1] += (err * 3) / 16;
+            nxtErr[px] += (err * 5) / 16;
+            if (px + 1 < w) nxtErr[px + 1] += (err * 1) / 16;
         }
     }
     free(usPixels);
