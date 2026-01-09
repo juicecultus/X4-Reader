@@ -95,7 +95,9 @@ void UIManager::showSleepScreen() {
   int randomSleepCover = 0;
   
   if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
-    auto files = sdManager.listFiles("/images", 100);
+    // List files once and keep them in memory if possible, or just optimize the search
+    // Scanning the directory every time during a power-down event might be risky
+    auto files = sdManager.listFiles("/images", 50);
     std::vector<String> images;
     for (const auto& f : files) {
       String lf = f;
@@ -112,7 +114,8 @@ void UIManager::showSleepScreen() {
       String selected = String("/images/") + images[idx];
       Serial.printf("Selecting random sleep cover: %s\n", selected.c_str());
       
-      if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getBBEPAPER(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
+      // Use BBEPAPER driver instance directly via EInkDisplay accessor
+      if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
         usedRandomCover = true;
       } else {
         Serial.println("Failed to decode random sleep cover");
@@ -142,8 +145,10 @@ void UIManager::showSleepScreen() {
     textRenderer.print(sleepText);
   }
 
-  // show the image with the grayscale antialiasing
+  // Final refresh to E-Ink hardware
   display.displayBuffer(EInkDisplay::FULL_REFRESH);
+  
+  // Grayscale support check (only if not using random cover which is currently 1-bit)
   if (!usedRandomCover && display.supportsGrayscale()) {
     display.copyGrayscaleBuffers(bebop_image_lsb, bebop_image_msb);
     display.displayGrayBuffer(true);

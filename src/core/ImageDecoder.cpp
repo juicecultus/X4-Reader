@@ -4,7 +4,7 @@
 static ImageDecoder::DecodeContext* g_ctx = nullptr;
 PNG* ImageDecoder::currentPNG = nullptr;
 
-bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t targetWidth, uint16_t targetHeight) {
+bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight) {
     String p = String(path);
     p.toLowerCase();
 
@@ -14,6 +14,7 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
     if (!ctx) return false;
 
     ctx->bbep = bbep;
+    ctx->frameBuffer = frameBuffer;
     ctx->targetWidth = targetWidth;
     ctx->targetHeight = targetHeight;
     ctx->offsetX = 0;
@@ -179,7 +180,19 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             uint32_t b8 = (b * 255) / 31;
             uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
             
-            ctx->bbep->drawPixel(targetX, targetY, (lum < 128) ? 0 : 1);
+            // Direct framebuffer write (0=black, 1=white)
+            // Stride is 800/8 = 100 bytes
+            if (ctx->frameBuffer) {
+                int byteIdx = (targetY * 100) + (targetX / 8);
+                int bitIdx = 7 - (targetX % 8);
+                if (lum < 128) {
+                    ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
+                } else {
+                    ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+                }
+            } else {
+                ctx->bbep->drawPixel(targetX, targetY, (lum < 128) ? 0 : 1);
+            }
         }
     }
     return 1;
@@ -216,8 +229,17 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         uint32_t b8 = (b * 255) / 31;
         uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
 
-        uint8_t color = (lum < 128) ? 0 : 1;
-        ctx->bbep->drawPixel(targetX, targetY, color);
+        if (ctx->frameBuffer) {
+            int byteIdx = (targetY * 100) + (targetX / 8);
+            int bitIdx = 7 - (targetX % 8);
+            if (lum < 128) {
+                ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
+            } else {
+                ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+            }
+        } else {
+            ctx->bbep->drawPixel(targetX, targetY, (lum < 128) ? 0 : 1);
+        }
     }
     free(usPixels);
 }

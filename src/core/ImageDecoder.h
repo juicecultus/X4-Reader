@@ -16,6 +16,7 @@ class ImageDecoder {
 public:
     struct DecodeContext {
         BBEPAPER* bbep;
+        uint8_t* frameBuffer;
         uint16_t targetWidth;
         uint16_t targetHeight;
         int16_t offsetX;
@@ -28,11 +29,12 @@ public:
      * 
      * @param path Path to the image file on SD card.
      * @param bbep Pointer to BBEPAPER driver instance.
+     * @param frameBuffer Pointer to raw 1-bit framebuffer (800x480).
      * @param targetWidth Target width (800 for current display).
      * @param targetHeight Target height (480 for current display).
      * @return true if decoding was successful.
      */
-    static bool decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t targetWidth, uint16_t targetHeight);
+    static bool decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight);
 
 private:
     static PNG* currentPNG;
