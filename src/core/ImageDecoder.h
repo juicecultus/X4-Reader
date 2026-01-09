@@ -20,6 +20,7 @@ public:
         uint16_t targetHeight;
         int16_t offsetX;
         int16_t offsetY;
+        int16_t* errorBuf;
         bool success;
     };
     /**

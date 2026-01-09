@@ -1,4 +1,5 @@
 #include "ImageDecoder.h"
+#include <vector>
 
 static ImageDecoder::DecodeContext* g_ctx = nullptr;
 PNG* ImageDecoder::currentPNG = nullptr;
@@ -7,12 +8,16 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
     String p = String(path);
     p.toLowerCase();
 
+    // Error buffer for dithering (two rows: current and next)
+    std::vector<int16_t> errorBuffer(targetWidth * 2, 0);
+
     DecodeContext ctx;
     ctx.bbep = bbep;
     ctx.targetWidth = targetWidth;
     ctx.targetHeight = targetHeight;
     ctx.offsetX = 0;
     ctx.offsetY = 0;
+    ctx.errorBuf = errorBuffer.data();
     ctx.success = false;
     g_ctx = &ctx;
 
@@ -120,22 +125,43 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
         int targetY = pDraw->y + y;
         if (targetY < 0 || targetY >= ctx->targetHeight) continue;
 
+        // Current and next error row pointers
+        int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
+        int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
+        // Clear next error row at start of its row
+        if (y == 0 || (pDraw->x == 0 && targetY < ctx->targetHeight - 1)) {
+            memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
+        }
+
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
             if (targetX < 0 || targetX >= ctx->targetWidth) continue;
 
             uint16_t pixel = pDraw->pPixels[y * pDraw->iWidth + x];
-            
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
             float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
-            // SSD1677: 0xFF (1) is white, 0x00 (0) is black.
-            // BBEPAPER drawPixel uses 0 for black, 1 for white.
-            uint8_t color = (lum < 128) ? 0 : 1;
+            // Apply error from previous pixels
+            int16_t gray = (int16_t)lum + curErr[targetX];
+            if (gray < 0) gray = 0;
+            if (gray > 255) gray = 255;
+
+            uint8_t color = (gray < 128) ? 0 : 1;
             ctx->bbep->drawPixel(targetX, targetY, color);
+
+            // Calculate error
+            int16_t err = gray - (color ? 255 : 0);
+
+            // Distribute error (Floyd-Steinberg)
+            if (targetX + 1 < ctx->targetWidth) curErr[targetX + 1] += (err * 7) / 16;
+            if (targetY + 1 < ctx->targetHeight) {
+                if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
+                nxtErr[targetX] += (err * 5) / 16;
+                if (targetX + 1 < ctx->targetWidth) nxtErr[targetX + 1] += (err * 1) / 16;
+            }
         }
     }
     return 1;
@@ -152,6 +178,10 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     int targetY = pDraw->y + ctx->offsetY;
     if (targetY < 0 || targetY >= ctx->targetHeight) return;
 
+    int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
+    int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
+    memset(nxtErr, 0, ctx->targetWidth * sizeof(int16_t));
+
     for (int x = 0; x < pDraw->iWidth; x++) {
         int targetX = x + ctx->offsetX;
         if (targetX < 0 || targetX >= ctx->targetWidth) continue;
@@ -163,8 +193,19 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         
         float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
 
-        uint8_t color = (lum < 128) ? 0 : 1;
+        int16_t gray = (int16_t)lum + curErr[targetX];
+        if (gray < 0) gray = 0;
+        if (gray > 255) gray = 255;
+
+        uint8_t color = (gray < 128) ? 0 : 1;
         ctx->bbep->drawPixel(targetX, targetY, color);
+
+        int16_t err = gray - (color ? 255 : 0);
+        if (targetX + 1 < ctx->targetWidth) curErr[targetX + 1] += (err * 7) / 16;
+        if (targetY + 1 < ctx->targetHeight) {
+            if (targetX > 0) nxtErr[targetX - 1] += (err * 3) / 16;
+            nxtErr[targetX] += (err * 5) / 16;
+            if (targetX + 1 < ctx->targetWidth) nxtErr[targetX + 1] += (err * 1) / 16;
+        }
     }
 }
-
