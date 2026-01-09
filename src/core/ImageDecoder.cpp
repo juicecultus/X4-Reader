@@ -137,23 +137,21 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
-        if (targetY < 0 || targetY >= ctx->targetHeight) continue;
+        // BBEPAPER boundary check
+        if (targetY < 0 || targetY >= 480 || targetY >= ctx->targetHeight) continue;
 
         const uint16_t* pSrcRow = &pDraw->pPixels[y * pDraw->iWidth];
 
         for (int x = 0; x < pDraw->iWidth; x++) {
             int targetX = pDraw->x + x;
-            if (targetX < 0 || targetX >= ctx->targetWidth) continue;
+            // BBEPAPER boundary check
+            if (targetX < 0 || targetX >= 800 || targetX >= ctx->targetWidth) continue;
 
             uint16_t pixel = pSrcRow[x];
             uint8_t r = (pixel >> 11) & 0x1F; 
             uint8_t g = (pixel >> 5) & 0x3F;  
             uint8_t b = pixel & 0x1F;         
             
-            // Integer-only luminance calculation to avoid FPU context issues in callbacks
-            // Using coefficients scaled by 1024: R*306 + G*601 + B*117
-            // r is 5 bits (0-31), g is 6 bits (0-63), b is 5 bits (0-31)
-            // First scale them to 8 bits
             uint32_t r8 = (r * 255) / 31;
             uint32_t g8 = (g * 255) / 63;
             uint32_t b8 = (b * 255) / 31;
@@ -178,14 +176,14 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     currentPNG->getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
     int targetY = pDraw->y + ctx->offsetY;
-    if (targetY < 0 || targetY >= ctx->targetHeight) {
+    if (targetY < 0 || targetY >= 480 || targetY >= ctx->targetHeight) {
         free(usPixels);
         return;
     }
 
     for (int x = 0; x < pDraw->iWidth; x++) {
         int targetX = x + ctx->offsetX;
-        if (targetX < 0 || targetX >= ctx->targetWidth) continue;
+        if (targetX < 0 || targetX >= 800 || targetX >= ctx->targetWidth) continue;
 
         uint16_t pixel = usPixels[x];
         uint8_t r = (pixel >> 11) & 0x1F; 
