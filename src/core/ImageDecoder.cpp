@@ -105,6 +105,9 @@ bool ImageDecoder::decodeToBW(const char* path, uint8_t* outBuffer, uint16_t tar
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
     
+    // Bytes per line in the destination buffer (Width/8)
+    const int destStride = (ctx->targetWidth + 7) / 8;
+
     for (int y = 0; y < pDraw->iHeight; y++) {
         int targetY = pDraw->y + y;
         if (targetY >= ctx->targetHeight) break;
@@ -115,17 +118,20 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
             uint16_t pixel = pDraw->pPixels[y * pDraw->iWidth + x];
             
-            // Extract RGB565 components (Big Endian from JPEGDEC)
-            uint8_t r = (pixel >> 11) & 0x1F;
-            uint8_t g = (pixel >> 5) & 0x3F;
-            uint8_t b = pixel & 0x1F;
+            // Extract RGB565 components
+            uint8_t r = (pixel >> 11) & 0x1F; // 5 bits
+            uint8_t g = (pixel >> 5) & 0x3F;  // 6 bits
+            uint8_t b = pixel & 0x1F;         // 5 bits
             
-            // Luminance (Standard coefficients)
-            uint8_t lum = (uint8_t)((r * 8 * 0.299f) + (g * 4 * 0.587f) + (b * 8 * 0.114f));
+            // Convert to 0-255 luminance
+            // r * 255/31 = 8.22
+            // g * 255/63 = 4.04
+            // b * 255/31 = 8.22
+            float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
             
             if (lum < 128) {
-                // Black pixel: bit is 0 in bb_epaper/microreader format
-                int byteIdx = (targetY * ((ctx->targetWidth + 7) / 8)) + (targetX / 8);
+                // Black pixel (0 in E-Ink)
+                int byteIdx = (targetY * destStride) + (targetX / 8);
                 int bitIdx = 7 - (targetX % 8);
                 ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
             }
@@ -142,6 +148,9 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     
     currentPNG->getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
+    // Bytes per line in the destination buffer (Width/8)
+    const int destStride = (ctx->targetWidth + 7) / 8;
+
     int targetY = pDraw->y;
     if (targetY >= ctx->targetHeight) return;
 
@@ -150,15 +159,15 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         if (targetX >= ctx->targetWidth) break;
 
         uint16_t pixel = usPixels[x];
-        uint8_t r = (pixel >> 11) & 0x1F;
-        uint8_t g = (pixel >> 5) & 0x3F;
-        uint8_t b = pixel & 0x1F;
+        uint8_t r = (pixel >> 11) & 0x1F; // 5 bits
+        uint8_t g = (pixel >> 5) & 0x3F;  // 6 bits
+        uint8_t b = pixel & 0x1F;         // 5 bits
         
-        // Luminance calculation
-        uint8_t lum = (uint8_t)((r * 8 * 0.299f) + (g * 4 * 0.587f) + (b * 8 * 0.114f));
+        // Convert to 0-255 luminance
+        float lum = (r * 8.22f * 0.299f) + (g * 4.04f * 0.587f) + (b * 8.22f * 0.114f);
 
         if (lum < 128) {
-            int byteIdx = (targetY * ((ctx->targetWidth + 7) / 8)) + (targetX / 8);
+            int byteIdx = (targetY * destStride) + (targetX / 8);
             int bitIdx = 7 - (targetX % 8);
             ctx->outBuffer[byteIdx] &= ~(1 << bitIdx);
         }
