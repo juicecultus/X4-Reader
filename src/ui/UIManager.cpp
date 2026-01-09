@@ -126,7 +126,20 @@ void UIManager::showSleepScreen() {
   }
 
   if (!usedRandomCover) {
+    // Draw bebop image centered as fallback
     display.drawImage(bebop_image, 0, 0, BEBOP_IMAGE_WIDTH, BEBOP_IMAGE_HEIGHT, true);
+  }
+
+  // TEST: Draw a small black rectangle in the center to verify FB access
+  uint8_t* fb = display.getFrameBuffer();
+  if (fb) {
+    for (int ty = 200; ty < 240; ty++) {
+      for (int tx = 380; tx < 420; tx++) {
+        int bIdx = (ty * 100) + (tx / 8);
+        int bit = 7 - (tx % 8);
+        fb[bIdx] &= ~(1 << bit); // Black
+      }
+    }
   }
 
   // Add "Sleeping..." text at the bottom (into the same back buffer)
