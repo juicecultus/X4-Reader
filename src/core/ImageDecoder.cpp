@@ -169,14 +169,20 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
 void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
     DecodeContext *ctx = (DecodeContext *)pDraw->pUser;
-    uint16_t usPixels[800]; 
     
     if (!currentPNG) return;
+    
+    // Allocate line buffer on heap to avoid stack overflow
+    uint16_t* usPixels = (uint16_t*)malloc(pDraw->iWidth * sizeof(uint16_t));
+    if (!usPixels) return;
     
     currentPNG->getLineAsRGB565(pDraw, usPixels, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
 
     int targetY = pDraw->y + ctx->offsetY;
-    if (targetY < 0 || targetY >= ctx->targetHeight) return;
+    if (targetY < 0 || targetY >= ctx->targetHeight) {
+        free(usPixels);
+        return;
+    }
 
     int16_t* curErr = &ctx->errorBuf[(targetY % 2) * ctx->targetWidth];
     int16_t* nxtErr = &ctx->errorBuf[((targetY + 1) % 2) * ctx->targetWidth];
@@ -208,4 +214,5 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
             if (targetX + 1 < ctx->targetWidth) nxtErr[targetX + 1] += (err * 1) / 16;
         }
     }
+    free(usPixels);
 }
