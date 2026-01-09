@@ -8,25 +8,29 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
     String p = String(path);
     p.toLowerCase();
 
-    // Error buffer for dithering (two rows: current and next)
+    // Allocate everything on heap to keep stack usage minimal
     std::vector<int16_t> errorBuffer(targetWidth * 2, 0);
+    DecodeContext* ctx = new DecodeContext();
+    if (!ctx) return false;
 
-    DecodeContext ctx;
-    ctx.bbep = bbep;
-    ctx.targetWidth = targetWidth;
-    ctx.targetHeight = targetHeight;
-    ctx.offsetX = 0;
-    ctx.offsetY = 0;
-    ctx.errorBuf = errorBuffer.data();
-    ctx.success = false;
-    g_ctx = &ctx;
+    ctx->bbep = bbep;
+    ctx->targetWidth = targetWidth;
+    ctx->targetHeight = targetHeight;
+    ctx->offsetX = 0;
+    ctx->offsetY = 0;
+    ctx->errorBuf = errorBuffer.data();
+    ctx->success = false;
+    g_ctx = ctx;
 
     if (p.endsWith(".jpg") || p.endsWith(".jpeg")) {
         JPEGDEC jpeg;
         File f = SD.open(path);
-        if (!f) return false;
+        if (!f) {
+            delete ctx;
+            g_ctx = nullptr;
+            return false;
+        }
 
-        // Use manual callback-based open to avoid linkage issues with File-based open
         int rc = jpeg.open((void *)&f, (int)f.size(), [](void *p) { /* close */ }, 
                        [](JPEGFILE *pfn, uint8_t *pBuf, int32_t iLen) -> int32_t {
                            if (!pfn || !pfn->fHandle) return -1;
@@ -38,7 +42,7 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
                        }, JPEGDraw);
 
         if (rc) {
-            jpeg.setUserPointer(&ctx);
+            jpeg.setUserPointer(ctx);
             
             int scale = 0;
             int iw = jpeg.getWidth();
@@ -55,11 +59,11 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
                 iw >>= 1; ih >>= 1;
             }
 
-            ctx.offsetX = (targetWidth - iw) / 2;
-            ctx.offsetY = (targetHeight - ih) / 2;
+            ctx->offsetX = (targetWidth - iw) / 2;
+            ctx->offsetY = (targetHeight - ih) / 2;
             
-            if (jpeg.decode(ctx.offsetX, ctx.offsetY, scale)) {
-                ctx.success = true;
+            if (jpeg.decode(ctx->offsetX, ctx->offsetY, scale)) {
+                ctx->success = true;
             }
             jpeg.close();
         }
@@ -70,6 +74,8 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
         File f = SD.open(path);
         if (!f) {
             currentPNG = nullptr;
+            delete ctx;
+            g_ctx = nullptr;
             return false;
         }
         
@@ -88,11 +94,11 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
                 delete file;
             }
         }, [](PNGFILE *pfn, uint8_t *pBuffer, int32_t iLength) -> int32_t {
-            if (!pfn->fHandle) return -1;
+            if (!pfn || !pfn->fHandle) return -1;
             File *file = (File *)pfn->fHandle;
             return (int32_t)file->read(pBuffer, (size_t)iLength);
         }, [](PNGFILE *pfn, int32_t iPos) -> int32_t {
-            if (!pfn->fHandle) return -1;
+            if (!pfn || !pfn->fHandle) return -1;
             File *file = (File *)pfn->fHandle;
             return file->seek((uint32_t)iPos) ? iPos : -1;
         }, [](PNGDRAW *pDraw) -> int {
@@ -101,12 +107,12 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
         });
         
         if (rc == PNG_SUCCESS) {
-            ctx.offsetX = (targetWidth - png.getWidth()) / 2;
-            ctx.offsetY = (targetHeight - png.getHeight()) / 2;
+            ctx->offsetX = (targetWidth - png.getWidth()) / 2;
+            ctx->offsetY = (targetHeight - png.getHeight()) / 2;
             
-            rc = png.decode(&ctx, 0);
+            rc = png.decode(ctx, 0);
             if (rc == PNG_SUCCESS) {
-                ctx.success = true;
+                ctx->success = true;
             }
             png.close();
         }
@@ -114,8 +120,10 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
         currentPNG = nullptr;
     }
 
+    bool result = ctx->success;
+    delete ctx;
     g_ctx = nullptr;
-    return ctx.success;
+    return result;
 }
 
 int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
