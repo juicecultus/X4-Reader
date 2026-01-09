@@ -21,6 +21,9 @@ public:
         uint16_t targetHeight;
         int16_t offsetX;
         int16_t offsetY;
+        uint16_t decodedWidth;
+        uint16_t decodedHeight;
+        bool rotateSource90;
         int16_t* errorBuf;
         bool success;
     };
