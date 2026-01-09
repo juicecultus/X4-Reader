@@ -94,14 +94,14 @@ void UIManager::showSleepScreen() {
   bool usedRandomCover = false;
   int randomSleepCover = 0;
   
-  if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
-    // List files once and keep them in memory if possible, or just optimize the search
-    // Scanning the directory every time during a power-down event might be risky
+    if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
     auto files = sdManager.listFiles("/images", 50);
     std::vector<String> images;
     for (const auto& f : files) {
       String lf = f;
       lf.toLowerCase();
+      // Filter out macOS metadata files which might be corrupted or invalid
+      if (lf.startsWith("._")) continue;
       if (lf.endsWith(".jpg") || lf.endsWith(".jpeg") || lf.endsWith(".png")) {
         images.push_back(f);
       }
