@@ -77,21 +77,35 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
                 {JPEG_SCALE_EIGHTH, 3},
             };
 
-            // Find first option that fits. If none fit, fall back to the smallest.
-            int scale = JPEG_SCALE_EIGHTH;
-            int outW = srcW >> 3;
-            int outH = srcH >> 3;
+            // Prefer a full-screen result:
+            // - If the image (as displayed) is larger than the target, decode at full size
+            //   (scale=0) and center-crop using negative offsets.
+            // - Otherwise, fall back to a "fit" downscale (letterbox).
+            int scale = 0;
+            int outW = srcW;
+            int outH = srcH;
 
-            for (size_t i = 0; i < (sizeof(opts) / sizeof(opts[0])); i++) {
-                const int w = srcW >> opts[i].shift;
-                const int h = srcH >> opts[i].shift;
-                const int visW = ctx->rotateSource90 ? h : w;
-                const int visH = ctx->rotateSource90 ? w : h;
-                if (visW <= (int)targetWidth && visH <= (int)targetHeight) {
-                    scale = opts[i].opt;
-                    outW = w;
-                    outH = h;
-                    break;
+            const int visW0 = ctx->rotateSource90 ? srcH : srcW;
+            const int visH0 = ctx->rotateSource90 ? srcW : srcH;
+            const bool canCoverAtFullRes = (visW0 >= (int)targetWidth) && (visH0 >= (int)targetHeight);
+
+            if (!canCoverAtFullRes) {
+                // Find first option that fits. If none fit, fall back to the smallest.
+                scale = JPEG_SCALE_EIGHTH;
+                outW = srcW >> 3;
+                outH = srcH >> 3;
+
+                for (size_t i = 0; i < (sizeof(opts) / sizeof(opts[0])); i++) {
+                    const int w = srcW >> opts[i].shift;
+                    const int h = srcH >> opts[i].shift;
+                    const int visW = ctx->rotateSource90 ? h : w;
+                    const int visH = ctx->rotateSource90 ? w : h;
+                    if (visW <= (int)targetWidth && visH <= (int)targetHeight) {
+                        scale = opts[i].opt;
+                        outW = w;
+                        outH = h;
+                        break;
+                    }
                 }
             }
 
@@ -101,11 +115,9 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
             const int visW = ctx->rotateSource90 ? outH : outW;
             const int visH = ctx->rotateSource90 ? outW : outH;
 
-            // Center (letterbox/pillarbox). Clamp to >= 0 to avoid accidental cropping.
+            // Center. Offsets may be negative when center-cropping to fill the screen.
             ctx->offsetX = ((int)targetWidth - visW) / 2;
             ctx->offsetY = ((int)targetHeight - visH) / 2;
-            if (ctx->offsetX < 0) ctx->offsetX = 0;
-            if (ctx->offsetY < 0) ctx->offsetY = 0;
             
             jpeg->setMaxOutputSize(1); 
 
@@ -265,8 +277,7 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint8_t* fr
 
             ctx->offsetX = ((int)targetWidth - iw) / 2;
             ctx->offsetY = ((int)targetHeight - ih) / 2;
-            if (ctx->offsetX < 0) ctx->offsetX = 0;
-            if (ctx->offsetY < 0) ctx->offsetY = 0;
+            // Offsets may be negative when center-cropping to fill the screen.
 
             Serial.printf("ImageDecoder: Decoding PNG %dx%d at offset %d,%d\n",
                           iw, ih, ctx->offsetX, ctx->offsetY);
