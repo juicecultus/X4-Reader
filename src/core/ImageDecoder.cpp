@@ -29,11 +29,11 @@ bool ImageDecoder::decodeToDisplay(const char* path, BBEPAPER* bbep, uint16_t ta
         // Use manual callback-based open to avoid linkage issues with File-based open
         int rc = jpeg.open((void *)&f, (int)f.size(), [](void *p) { /* close */ }, 
                        [](JPEGFILE *pfn, uint8_t *pBuf, int32_t iLen) -> int32_t {
-                           if (!pfn->fHandle) return -1;
+                           if (!pfn || !pfn->fHandle) return -1;
                            return ((File *)pfn->fHandle)->read(pBuf, (size_t)iLen);
                        },
                        [](JPEGFILE *pfn, int32_t iPos) -> int32_t {
-                           if (!pfn->fHandle) return -1;
+                           if (!pfn || !pfn->fHandle) return -1;
                            return ((File *)pfn->fHandle)->seek((uint32_t)iPos) ? iPos : -1;
                        }, JPEGDraw);
 
