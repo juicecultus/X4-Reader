@@ -539,6 +539,18 @@ void TextViewerScreen::openFile(const String& sdPath) {
     }
     provider = ep;
 
+    // Cache cover path for sleep screen (best-effort)
+    {
+      String coverPath = ep->getCoverImagePath();
+      Settings& s = uiManager.getSettings();
+      if (coverPath.length() > 0) {
+        s.setString(String("textviewer.lastCoverPath"), coverPath);
+      } else {
+        s.setString(String("textviewer.lastCoverPath"), String(""));
+      }
+      (void)s.save();
+    }
+
   } else {
     // Use regular file word provider for text files
     FileWordProvider* fp = new FileWordProvider(sdPath.c_str());
@@ -550,6 +562,13 @@ void TextViewerScreen::openFile(const String& sdPath) {
       return;
     }
     provider = fp;
+
+    // Clear cover path for non-EPUB files
+    {
+      Settings& s = uiManager.getSettings();
+      s.setString(String("textviewer.lastCoverPath"), String(""));
+      (void)s.save();
+    }
   }
 
   // Set the hyphenation language based on the file type

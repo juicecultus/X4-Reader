@@ -35,7 +35,8 @@ class SettingsScreen : public Screen {
   int fontFamilyIndex = 5;  // 0=NotoSans, 1=Bookerly
   int fontSizeIndex = 6;    // 0=Small(26), 1=Medium(28), 2=Large(30)
   int uiFontSizeIndex = 7;  // 0=Small(14), 1=Large(28)
-  int randomSleepCoverIndex = 8; // 0=OFF, 1=ON
+  // Sleep screen mode: 0=Book Cover (default), 1=SD Random
+  int sleepScreenModeIndex = 0;
 
   // Reading orientation: 0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW
   int orientationIndex = 0;

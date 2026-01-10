@@ -1344,3 +1344,10 @@ Language EpubWordProvider::getLanguage() const {
   String langStr = epubReader_->getLanguage();
   return stringToLanguage(langStr);
 }
+
+String EpubWordProvider::getCoverImagePath() const {
+  if (!isEpub_ || !epubReader_) {
+    return String("");
+  }
+  return epubReader_->getCoverImagePath();
+}

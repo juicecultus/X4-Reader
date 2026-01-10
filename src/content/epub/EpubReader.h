@@ -135,6 +135,10 @@ class EpubReader {
     return language_;
   }
 
+  // If the EPUB declares a cover image in content.opf, this will return the
+  // extracted SD path for that cover image. Returns empty string if not found.
+  String getCoverImagePath();
+
   /**
    * Get the underlying epub_reader handle (for debugging/testing)
    */
@@ -152,6 +156,7 @@ class EpubReader {
   bool parseContainer();
   bool parseContentOpf();
   bool parseMetadata();
+  bool parseCoverInfo();
   bool parseTocNcx();
   bool parseCssFiles();
   bool cleanExtractDir();
@@ -184,6 +189,9 @@ class EpubReader {
   bool cleanCacheOnStart_ = false;
   String language_;      // Language of the EPUB
   size_t epubFileSize_;  // Size of the EPUB file for cache validation
+
+  // Cover image href (relative to content.opf directory)
+  String coverHref_;
 };
 
 #endif

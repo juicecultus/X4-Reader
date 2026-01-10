@@ -25,6 +25,23 @@ static bool strcasecmp_helper(const String& str1, const char* str2) {
   return true;
 }
 
+String EpubReader::getCoverImagePath() {
+  if (!valid_) {
+    return String("");
+  }
+  if (coverHref_.isEmpty()) {
+    return String("");
+  }
+
+  String baseDir = "";
+  int lastSlash = contentOpfPath_.lastIndexOf('/');
+  if (lastSlash >= 0) {
+    baseDir = contentOpfPath_.substring(0, lastSlash + 1);
+  }
+  String fullPath = baseDir + coverHref_;
+  return getFile(fullPath.c_str());
+}
+
 static String decodeHtmlEntityForToc(const String& entity) {
   if (entity == "&nbsp;")
     return "\xC2\xA0";
@@ -957,6 +974,10 @@ bool EpubReader::parseContentOpf() {
     Serial.println("WARNING: Failed to parse metadata");
   }
 
+  if (!parseCoverInfo()) {
+    Serial.println("WARNING: Failed to parse cover info");
+  }
+
   return true;
 }
 
@@ -1056,6 +1077,7 @@ bool EpubReader::parseMetadata() {
   }
 
   bool inMetadata = false;
+  bool foundLanguage = false;
   while (parser->read()) {
     SimpleXmlParser::NodeType nodeType = parser->getNodeType();
     String name = parser->getName();
@@ -1077,12 +1099,15 @@ bool EpubReader::parseMetadata() {
           if (!lang.isEmpty()) {
             language_ = lang;
             Serial.printf("    Found language: %s\n", language_.c_str());
+            foundLanguage = true;
           }
         }
-        break;  // Found language, can stop
       }
     } else if (nodeType == SimpleXmlParser::EndElement && strcasecmp_helper(name, "metadata")) {
       inMetadata = false;
+      if (foundLanguage) {
+        break;
+      }
     }
   }
 
@@ -1092,6 +1117,94 @@ bool EpubReader::parseMetadata() {
   unsigned long endTime = millis();
   Serial.printf("    Metadata parsing took %lu ms\n", endTime - startTime);
 
+  return true;
+}
+
+bool EpubReader::parseCoverInfo() {
+  coverHref_ = "";
+
+  // Re-open content.opf for cover parsing
+  String opfPath = getExtractedPath(contentOpfPath_.c_str());
+  if (opfPath.isEmpty()) {
+    return false;
+  }
+
+  // Pass 1: locate EPUB2 cover id via <meta name="cover" content="..." />
+  String coverId = "";
+  {
+    SimpleXmlParser* parser = new SimpleXmlParser();
+    if (!parser->open(opfPath.c_str())) {
+      delete parser;
+      return false;
+    }
+
+    while (parser->read()) {
+      if (parser->getNodeType() != SimpleXmlParser::Element) {
+        continue;
+      }
+      String name = parser->getName();
+      if (name.indexOf("meta") >= 0) {
+        String metaName = parser->getAttribute("name");
+        if (metaName == "cover") {
+          coverId = parser->getAttribute("content");
+        }
+      }
+    }
+
+    parser->close();
+    delete parser;
+  }
+
+  // Pass 2: scan manifest items for EPUB3 cover-image property or matching EPUB2 cover id
+  {
+    SimpleXmlParser* parser = new SimpleXmlParser();
+    if (!parser->open(opfPath.c_str())) {
+      delete parser;
+      return false;
+    }
+
+    while (parser->read()) {
+      if (parser->getNodeType() != SimpleXmlParser::Element) {
+        continue;
+      }
+      String name = parser->getName();
+      if (!strcasecmp_helper(name, "item")) {
+        continue;
+      }
+
+      String href = parser->getAttribute("href");
+      if (href.isEmpty()) {
+        continue;
+      }
+
+      // EPUB3: <item properties="cover-image" href="..." />
+      String props = parser->getAttribute("properties");
+      if (!props.isEmpty()) {
+        String p = props;
+        p.toLowerCase();
+        if (p.indexOf("cover-image") >= 0) {
+          coverHref_ = href;
+          break;
+        }
+      }
+
+      // EPUB2: match manifest item by id referenced by <meta name="cover" content="id"/>
+      if (!coverId.isEmpty()) {
+        String id = parser->getAttribute("id");
+        if (!id.isEmpty() && id == coverId) {
+          coverHref_ = href;
+          break;
+        }
+      }
+    }
+
+    parser->close();
+    delete parser;
+  }
+
+  if (!coverHref_.isEmpty()) {
+    Serial.printf("    Found cover href: %s\n", coverHref_.c_str());
+  }
   return true;
 }
 

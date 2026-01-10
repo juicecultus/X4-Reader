@@ -306,9 +306,22 @@ void UIManager::showSleepScreen() {
   display.clearScreen(0xFF);
 
   bool usedRandomCover = false;
-  int randomSleepCover = 0;
-  
-  if (settings && settings->getInt(String("settings.randomSleepCover"), randomSleepCover) && randomSleepCover != 0) {
+  int sleepMode = 0;
+  if (settings) {
+    (void)settings->getInt(String("settings.sleepScreenMode"), sleepMode);
+  }
+
+  if (sleepMode == 0 && settings) {
+    String coverPath = settings->getString(String("textviewer.lastCoverPath"), String(""));
+    if (coverPath.length() > 0 && SD.exists(coverPath.c_str())) {
+      Serial.printf("Selecting book cover sleep screen: %s\n", coverPath.c_str());
+      if (ImageDecoder::decodeToDisplay(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
+        usedRandomCover = true;
+      } else {
+        Serial.println("Failed to decode book cover sleep screen");
+      }
+    }
+  } else if (sleepMode == 1) {
     auto files = sdManager.listFiles("/images", 50);
     std::vector<String> images;
     for (const auto& f : files) {

@@ -144,8 +144,8 @@ void SettingsScreen::toggleCurrentSetting() {
       uiFontSizeIndex = 1 - uiFontSizeIndex;
       applyUIFontSettings();
       break;
-    case 7:  // Random Sleep Cover
-      randomSleepCoverIndex = 1 - randomSleepCoverIndex;
+    case 7:  // Sleep Screen
+      sleepScreenModeIndex = 1 - sleepScreenModeIndex;
       break;
     case 8:  // Orientation
       orientationIndex++;
@@ -235,10 +235,16 @@ void SettingsScreen::loadSettings() {
     uiFontSizeIndex = uiFontSize;
   }
 
-  // Load random sleep cover (0=OFF, 1=ON)
-  int randomSleepCover = 0;
-  if (s.getInt(String("settings.randomSleepCover"), randomSleepCover)) {
-    randomSleepCoverIndex = randomSleepCover;
+  // Load sleep screen mode (0=Book Cover, 1=SD Random)
+  // Migrate legacy settings.randomSleepCover (0=OFF,1=ON) to mode (OFF->Book Cover, ON->SD Random)
+  int sleepMode = 0;
+  if (s.getInt(String("settings.sleepScreenMode"), sleepMode)) {
+    sleepScreenModeIndex = sleepMode;
+  } else {
+    int randomSleepCover = 0;
+    if (s.getInt(String("settings.randomSleepCover"), randomSleepCover)) {
+      sleepScreenModeIndex = (randomSleepCover != 0) ? 1 : 0;
+    }
   }
 
   // Load reading orientation (0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW)
@@ -268,7 +274,7 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.fontFamily"), fontFamilyIndex);
   s.setInt(String("settings.fontSize"), fontSizeIndex);
   s.setInt(String("settings.uiFontSize"), uiFontSizeIndex);
-  s.setInt(String("settings.randomSleepCover"), randomSleepCoverIndex);
+  s.setInt(String("settings.sleepScreenMode"), sleepScreenModeIndex);
   s.setInt(String("settings.orientation"), orientationIndex);
   s.setInt(String("settings.sleepTimeout"), sleepTimeoutIndex);
 
@@ -294,7 +300,7 @@ String SettingsScreen::getSettingName(int index) {
     case 6:
       return "UI Font Size";
     case 7:
-      return "Random Sleep Cover";
+      return "Sleep Screen";
     case 8:
       return "Orientation";
     case 9:
@@ -354,7 +360,7 @@ String SettingsScreen::getSettingValue(int index) {
     case 6:
       return uiFontSizeIndex ? "Large" : "Small";
     case 7:
-      return randomSleepCoverIndex ? "On" : "Off";
+      return sleepScreenModeIndex ? "SD Random" : "Book Cover";
     case 8:
       switch (orientationIndex) {
         case 0:
