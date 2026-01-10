@@ -72,15 +72,46 @@ void TextRenderer::drawPixel(int16_t x, int16_t y, bool state) {
     return;
   }
 
-  // Bounds checking (portrait: 480x800)
-  if (x < 0 || x >= EInkDisplay::DISPLAY_HEIGHT || y < 0 || y >= EInkDisplay::DISPLAY_WIDTH) {
+  // Bounds checking in logical coordinate space
+  int16_t logicalW = EInkDisplay::DISPLAY_HEIGHT;  // 480
+  int16_t logicalH = EInkDisplay::DISPLAY_WIDTH;   // 800
+  if (orientation == LandscapeClockwise || orientation == LandscapeCounterClockwise) {
+    logicalW = EInkDisplay::DISPLAY_WIDTH;   // 800
+    logicalH = EInkDisplay::DISPLAY_HEIGHT;  // 480
+  }
+  if (x < 0 || x >= logicalW || y < 0 || y >= logicalH) {
     return;
   }
 
-  // Rotate coordinates: portrait (480x800) -> landscape (800x480)
-  // Rotation: 90 degrees clockwise
-  int16_t rotatedX = y;
-  int16_t rotatedY = EInkDisplay::DISPLAY_HEIGHT - 1 - x;
+  int16_t rotatedX = 0;
+  int16_t rotatedY = 0;
+  switch (orientation) {
+    case Portrait:
+      // Logical portrait (480x800) -> panel (800x480): 90 deg clockwise
+      rotatedX = y;
+      rotatedY = EInkDisplay::DISPLAY_HEIGHT - 1 - x;
+      break;
+    case LandscapeClockwise:
+      // Logical landscape (800x480) rotated 180 degrees
+      rotatedX = EInkDisplay::DISPLAY_WIDTH - 1 - x;
+      rotatedY = EInkDisplay::DISPLAY_HEIGHT - 1 - y;
+      break;
+    case PortraitInverted:
+      // Logical portrait (480x800) -> panel (800x480): 90 deg counter-clockwise
+      rotatedX = EInkDisplay::DISPLAY_WIDTH - 1 - y;
+      rotatedY = x;
+      break;
+    case LandscapeCounterClockwise:
+      // Logical landscape aligned with panel orientation
+      rotatedX = x;
+      rotatedY = y;
+      break;
+  }
+
+  // Bounds checking against physical panel dimensions
+  if (rotatedX < 0 || rotatedX >= EInkDisplay::DISPLAY_WIDTH || rotatedY < 0 || rotatedY >= EInkDisplay::DISPLAY_HEIGHT) {
+    return;
+  }
 
   // Calculate byte position and bit position
   uint16_t byteIndex = rotatedY * EInkDisplay::DISPLAY_WIDTH_BYTES + (rotatedX / 8);

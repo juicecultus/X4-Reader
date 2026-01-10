@@ -61,6 +61,18 @@ void TextViewerScreen::loadSettingsFromFile() {
   // to the layout config. Settings are loaded from file once at startup by UIManager.
   Settings& s = uiManager.getSettings();
 
+  // Apply reading orientation: update logical page dimensions for layout.
+  // 0=Portrait(480x800), 1=Landscape CW(800x480), 2=Inverted(480x800), 3=Landscape CCW(800x480)
+  int orientation = 0;
+  (void)s.getInt(String("settings.orientation"), orientation);
+  if (orientation == 1 || orientation == 3) {
+    layoutConfig.pageWidth = 800;
+    layoutConfig.pageHeight = 480;
+  } else {
+    layoutConfig.pageWidth = 480;
+    layoutConfig.pageHeight = 800;
+  }
+
   // Apply layout config from Settings
   int margin = 10;
   if (s.getInt(String("settings.margin"), margin)) {
@@ -225,8 +237,8 @@ void TextViewerScreen::showPage() {
     int16_t x1, y1;
     uint16_t w, h;
     textRenderer.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-    int16_t centerX = (480 - w) / 2;
-    int16_t centerY = (800 - h) / 2;
+    int16_t centerX = (layoutConfig.pageWidth - (int)w) / 2;
+    int16_t centerY = (layoutConfig.pageHeight - (int)h) / 2;
     textRenderer.setCursor(centerX, centerY);
     textRenderer.print(msg);
     display.displayBuffer(EInkDisplay::FAST_REFRESH);
@@ -315,8 +327,9 @@ void TextViewerScreen::showPage() {
     int16_t x1, y1;
     uint16_t w, h;
     textRenderer.getTextBounds(indicator.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int16_t centerX = (480 - w) / 2;
-    textRenderer.setCursor(centerX, 790);
+    int16_t centerX = (layoutConfig.pageWidth - (int)w) / 2;
+    int16_t indicatorY = layoutConfig.pageHeight - 10;
+    textRenderer.setCursor(centerX, indicatorY);
     textRenderer.print(indicator);
   }
 
@@ -636,8 +649,8 @@ void TextViewerScreen::showErrorMessage(const char* msg) {
   int16_t x1, y1;
   uint16_t w, h;
   textRenderer.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-  int16_t centerX = (480 - w) / 2;
-  int16_t centerY = (800 - h) / 2;
+  int16_t centerX = (layoutConfig.pageWidth - (int)w) / 2;
+  int16_t centerY = (layoutConfig.pageHeight - (int)h) / 2;
   textRenderer.setCursor(centerX, centerY);
   textRenderer.print(msg);
 

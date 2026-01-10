@@ -147,20 +147,25 @@ void SettingsScreen::toggleCurrentSetting() {
     case 7:  // Random Sleep Cover
       randomSleepCoverIndex = 1 - randomSleepCoverIndex;
       break;
-    case 8:  // Clock
+    case 8:  // Orientation
+      orientationIndex++;
+      if (orientationIndex >= 4)
+        orientationIndex = 0;
+      break;
+    case 9:  // Clock
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::ClockSettings);
       return;
       break;
-    case 9:  // WiFi Setup
+    case 10:  // WiFi Setup
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::WifiSettings);
       return;
       break;
-    case 10:  // Clear Cache
+    case 11:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
-    case 11:  // TOC
+    case 12:  // TOC
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::Chapters);
       return;
@@ -231,6 +236,12 @@ void SettingsScreen::loadSettings() {
     randomSleepCoverIndex = randomSleepCover;
   }
 
+  // Load reading orientation (0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW)
+  int orientation = 0;
+  if (s.getInt(String("settings.orientation"), orientation)) {
+    orientationIndex = orientation;
+  }
+
   // Apply the loaded font settings
   applyFontSettings();
   applyUIFontSettings();
@@ -247,6 +258,7 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.fontSize"), fontSizeIndex);
   s.setInt(String("settings.uiFontSize"), uiFontSizeIndex);
   s.setInt(String("settings.randomSleepCover"), randomSleepCoverIndex);
+  s.setInt(String("settings.orientation"), orientationIndex);
 
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
@@ -272,12 +284,14 @@ String SettingsScreen::getSettingName(int index) {
     case 7:
       return "Random Sleep Cover";
     case 8:
-      return "Clock";
+      return "Orientation";
     case 9:
-      return "WiFi";
+      return "Clock";
     case 10:
-      return "Clear Cache";
+      return "WiFi";
     case 11:
+      return "Clear Cache";
+    case 12:
       return "TOC";
     default:
       return "";
@@ -328,14 +342,27 @@ String SettingsScreen::getSettingValue(int index) {
     case 7:
       return randomSleepCoverIndex ? "On" : "Off";
     case 8:
-      return "Setup";
+      switch (orientationIndex) {
+        case 0:
+          return "Portrait";
+        case 1:
+          return "Land CW";
+        case 2:
+          return "Inverted";
+        case 3:
+          return "Land CCW";
+        default:
+          return "Portrait";
+      }
     case 9:
       return "Setup";
     case 10:
+      return "Setup";
+    case 11:
       if (clearCacheStatus < 0)
         return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
-    case 11:
+    case 12:
       return "Open";
     default:
       return "";

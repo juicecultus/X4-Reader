@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 12;
+  static constexpr int SETTINGS_COUNT = 13;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -36,6 +36,9 @@ class SettingsScreen : public Screen {
   int fontSizeIndex = 6;    // 0=Small(26), 1=Medium(28), 2=Large(30)
   int uiFontSizeIndex = 7;  // 0=Small(14), 1=Large(28)
   int randomSleepCoverIndex = 8; // 0=OFF, 1=ON
+
+  // Reading orientation: 0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW
+  int orientationIndex = 0;
 
   int clearCacheStatus = -1; // -1=idle, 0=fail, 1=ok
 

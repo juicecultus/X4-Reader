@@ -664,6 +664,32 @@ void UIManager::showScreen(ScreenId id) {
       settingsReturnScreen = currentScreen;
     }
   }
+
+  // Apply reading orientation only while in TextViewer; keep UI screens in portrait.
+  if (id == ScreenId::TextViewer && settings) {
+    int orientation = 0;
+    (void)settings->getInt(String("settings.orientation"), orientation);
+    switch (orientation) {
+      case 0:
+        textRenderer.setOrientation(TextRenderer::Portrait);
+        break;
+      case 1:
+        textRenderer.setOrientation(TextRenderer::LandscapeClockwise);
+        break;
+      case 2:
+        textRenderer.setOrientation(TextRenderer::PortraitInverted);
+        break;
+      case 3:
+        textRenderer.setOrientation(TextRenderer::LandscapeCounterClockwise);
+        break;
+      default:
+        textRenderer.setOrientation(TextRenderer::Portrait);
+        break;
+    }
+  } else {
+    textRenderer.setOrientation(TextRenderer::Portrait);
+  }
+
   previousScreen = currentScreen;
   currentScreen = id;
   // Call activate so screens can perform any work needed when they become

@@ -16,6 +16,13 @@ class EInkDisplay;  // Forward declaration
 
 class TextRenderer {
  public:
+  enum Orientation {
+    Portrait,                  // 480x800 logical coordinates
+    LandscapeClockwise,        // 800x480 logical coordinates, rotated 180°
+    PortraitInverted,          // 480x800 logical coordinates, inverted
+    LandscapeCounterClockwise  // 800x480 logical coordinates, aligned with panel
+  };
+
   // Bitmap selection for font rendering
   enum BitmapType {
     BITMAP_BW,        // Use the main black & white bitmap
@@ -28,6 +35,13 @@ class TextRenderer {
 
   // Low-level pixel draw used by font blitting
   void drawPixel(int16_t x, int16_t y, bool state);
+
+  void setOrientation(Orientation o) {
+    orientation = o;
+  }
+  Orientation getOrientation() const {
+    return orientation;
+  }
 
   // Set which framebuffer to write to
   void setFrameBuffer(uint8_t* buffer);
@@ -58,6 +72,7 @@ class TextRenderer {
   FontStyle currentStyle = FontStyle::REGULAR;
   uint8_t* frameBuffer = nullptr;
   BitmapType bitmapType = BITMAP_BW;
+  Orientation orientation = Portrait;
   int16_t cursorX = 0;
   int16_t cursorY = 0;
   uint16_t textColor = COLOR_BLACK;
