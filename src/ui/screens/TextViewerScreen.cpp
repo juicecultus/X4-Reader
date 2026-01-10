@@ -10,6 +10,8 @@
 #include "../../content/providers/EpubWordProvider.h"
 #include "../../content/providers/FileWordProvider.h"
 #include "../../content/providers/StringWordProvider.h"
+
+#include "../../content/epub/epub_parser.h"
 #include "../../core/Buttons.h"
 #include "../../core/SDCardManager.h"
 #include "../../core/Settings.h"
@@ -186,6 +188,14 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
     // Save current position for the opened book (if any) before leaving
     savePositionToFile();
     saveSettingsToFile();
+
+    // Aggressively release memory so opening an uncached large EPUB has the
+    // best chance of succeeding under fragmented heap conditions.
+    delete provider;
+    provider = nullptr;
+    loadedText = String("");
+    epub_release_shared_buffers();
+
     uiManager.showScreen(UIManager::ScreenId::FileBrowser);
   } else if (buttons.isPressed(Buttons::CONFIRM)) {
     // Open settings
