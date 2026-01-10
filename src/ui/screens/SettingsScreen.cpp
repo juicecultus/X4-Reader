@@ -36,6 +36,7 @@ void SettingsScreen::handleButtons(Buttons& buttons) {
 }
 
 void SettingsScreen::activate() {
+  selectedIndex = 0;
   loadSettings();
 }
 
@@ -110,70 +111,70 @@ void SettingsScreen::selectPrev() {
 
 void SettingsScreen::toggleCurrentSetting() {
   switch (selectedIndex) {
-    case 0:  // Horizontal Margins
+    case 0:  // TOC
+      saveSettings();
+      uiManager.showScreen(UIManager::ScreenId::Chapters);
+      return;
+      break;
+    case 1:  // Horizontal Margins
       marginIndex++;
       if (marginIndex >= marginValuesCount)
         marginIndex = 0;
       break;
-    case 1:  // Line Height
+    case 2:  // Line Height
       lineHeightIndex++;
       if (lineHeightIndex >= lineHeightValuesCount)
         lineHeightIndex = 0;
       break;
-    case 2:  // Alignment
+    case 3:  // Alignment
       alignmentIndex++;
       if (alignmentIndex >= 3)
         alignmentIndex = 0;
       break;
-    case 3:  // Show Chapter Numbers
+    case 4:  // Show Chapter Numbers
       showChapterNumbersIndex = 1 - showChapterNumbersIndex;
       break;
-    case 4:  // Font Family
+    case 5:  // Font Family
       fontFamilyIndex++;
       if (fontFamilyIndex >= 2)
         fontFamilyIndex = 0;
       applyFontSettings();
       break;
-    case 5:  // Font Size
+    case 6:  // Font Size
       fontSizeIndex++;
       if (fontSizeIndex >= 3)
         fontSizeIndex = 0;
       applyFontSettings();
       break;
-    case 6:  // UI Font Size
+    case 7:  // UI Font Size
       uiFontSizeIndex = 1 - uiFontSizeIndex;
       applyUIFontSettings();
       break;
-    case 7:  // Sleep Screen
+    case 8:  // Sleep Screen
       sleepScreenModeIndex = 1 - sleepScreenModeIndex;
       break;
-    case 8:  // Orientation
+    case 9:  // Orientation
       orientationIndex++;
       if (orientationIndex >= 4)
         orientationIndex = 0;
       break;
-    case 9:  // Time to Sleep
+    case 10:  // Time to Sleep
       sleepTimeoutIndex++;
       if (sleepTimeoutIndex >= 5)
         sleepTimeoutIndex = 0;
       break;
-    case 10:  // Clock
+    case 11:  // Clock
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::ClockSettings);
       return;
       break;
-    case 11:  // WiFi Setup
+    case 12:  // WiFi Setup
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::WifiSettings);
       return;
       break;
-    case 12:  // Clear Cache
+    case 13:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
-      break;
-    case 13:  // TOC
-      saveSettings();
-      uiManager.showScreen(UIManager::ScreenId::Chapters);
-      return;
       break;
   }
   saveSettings();
@@ -286,33 +287,33 @@ void SettingsScreen::saveSettings() {
 String SettingsScreen::getSettingName(int index) {
   switch (index) {
     case 0:
-      return "Margins";
-    case 1:
-      return "Line Height";
-    case 2:
-      return "Alignment";
-    case 3:
-      return "Chapter Numbers";
-    case 4:
-      return "Font Family";
-    case 5:
-      return "Font Size";
-    case 6:
-      return "UI Font Size";
-    case 7:
-      return "Sleep Screen";
-    case 8:
-      return "Orientation";
-    case 9:
-      return "Time to Sleep";
-    case 10:
-      return "Clock";
-    case 11:
-      return "WiFi";
-    case 12:
-      return "Clear Cache";
-    case 13:
       return "TOC";
+    case 1:
+      return "Margins";
+    case 2:
+      return "Line Height";
+    case 3:
+      return "Alignment";
+    case 4:
+      return "Chapter Numbers";
+    case 5:
+      return "Font Family";
+    case 6:
+      return "Font Size";
+    case 7:
+      return "UI Font Size";
+    case 8:
+      return "Sleep Screen";
+    case 9:
+      return "Orientation";
+    case 10:
+      return "Time to Sleep";
+    case 11:
+      return "Clock";
+    case 12:
+      return "WiFi";
+    case 13:
+      return "Clear Cache";
     default:
       return "";
   }
@@ -321,10 +322,12 @@ String SettingsScreen::getSettingName(int index) {
 String SettingsScreen::getSettingValue(int index) {
   switch (index) {
     case 0:
-      return String(marginValues[marginIndex]);
+      return "Open";
     case 1:
-      return String(lineHeightValues[lineHeightIndex]);
+      return String(marginValues[marginIndex]);
     case 2:
+      return String(lineHeightValues[lineHeightIndex]);
+    case 3:
       switch (alignmentIndex) {
         case 0:
           return "Left";
@@ -335,9 +338,9 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 3:
-      return showChapterNumbersIndex ? "On" : "Off";
     case 4:
+      return showChapterNumbersIndex ? "On" : "Off";
+    case 5:
       switch (fontFamilyIndex) {
         case 0:
           return "NotoSans";
@@ -346,7 +349,7 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 5:
+    case 6:
       switch (fontSizeIndex) {
         case 0:
           return "Small";
@@ -357,11 +360,11 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Unknown";
       }
-    case 6:
-      return uiFontSizeIndex ? "Large" : "Small";
     case 7:
-      return sleepScreenModeIndex ? "SD Random" : "Book Cover";
+      return uiFontSizeIndex ? "Large" : "Small";
     case 8:
+      return sleepScreenModeIndex ? "SD Random" : "Book Cover";
+    case 9:
       switch (orientationIndex) {
         case 0:
           return "Portrait";
@@ -374,7 +377,7 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Portrait";
       }
-    case 9:
+    case 10:
       switch (sleepTimeoutIndex) {
         case 0:
           return "1 min";
@@ -389,16 +392,14 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "10 min";
       }
-    case 10:
-      return "Setup";
     case 11:
       return "Setup";
     case 12:
+      return "Setup";
+    case 13:
       if (clearCacheStatus < 0)
         return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
-    case 13:
-      return "Open";
     default:
       return "";
   }
