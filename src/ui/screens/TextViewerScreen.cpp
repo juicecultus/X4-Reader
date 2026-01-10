@@ -661,6 +661,16 @@ void TextViewerScreen::loadPositionFromFile() {
   if (currentFilePath.length() == 0)
     return;
   String posPath = currentFilePath + String(".pos");
+
+  // New books won't have a position file yet; don't trigger noisy VFS errors.
+  sdManager.ensureSpiBusIdle();
+  if (!SD.exists(posPath.c_str())) {
+    currentChapter = 0;
+    pageStartIndex = 0;
+    pageEndIndex = 0;
+    return;
+  }
+
   char buf[64];
   size_t r = sdManager.readFileToBuffer(posPath.c_str(), buf, sizeof(buf));
 
