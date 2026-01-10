@@ -63,6 +63,10 @@ void ChaptersScreen::render() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   {
     const char* title = "Chapters";
     int16_t x1, y1;

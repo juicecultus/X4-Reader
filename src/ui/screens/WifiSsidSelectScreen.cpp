@@ -83,6 +83,10 @@ void WifiSsidSelectScreen::render() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   {
     const char* title = "Select SSID";
     int16_t x1, y1;

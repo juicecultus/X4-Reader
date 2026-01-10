@@ -67,6 +67,10 @@ void FileBrowserScreen::renderSdBrowser() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   // Center the title horizontally (page width is 480 in portrait coordinate system)
   {
     const char* title = "Microreader";
@@ -76,14 +80,6 @@ void FileBrowserScreen::renderSdBrowser() {
     int16_t centerX = (480 - (int)w) / 2;
     textRenderer.setCursor(centerX, 75);
     textRenderer.print(title);
-  }
-
-  // Top-left clock
-  {
-    textRenderer.setFont(&MenuFontSmall);
-    String t = uiManager.getClockString();
-    textRenderer.setCursor(10, 35);
-    textRenderer.print(t);
   }
 
   textRenderer.setFont(getMainFont());
@@ -148,20 +144,6 @@ void FileBrowserScreen::renderSdBrowser() {
     textRenderer.print(displayName);
   }
 
-  // Draw battery percentage at bottom-right of the screen
-  {
-    textRenderer.setFont(&MenuFontSmall);  // Always use small font for battery
-    int pct = g_battery.readPercentage();
-    String pctStr = String(pct) + "%";
-    int16_t bx1, by1;
-    uint16_t bw, bh;
-    textRenderer.getTextBounds(pctStr.c_str(), 0, 0, &bx1, &by1, &bw, &bh);
-    int16_t bx = (480 - (int)bw) / 2;
-    // Use baseline near bottom (page height is 800); align similar to other screens
-    int16_t by = 790;
-    textRenderer.setCursor(bx, by);
-    textRenderer.print(pctStr);
-  }
 }
 
 void FileBrowserScreen::confirm() {

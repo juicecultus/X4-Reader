@@ -169,6 +169,10 @@ void TimezoneSelectScreen::render() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   String title = getTitle();
   {
     int16_t x1, y1;

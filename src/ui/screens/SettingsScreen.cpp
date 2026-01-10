@@ -53,6 +53,10 @@ void SettingsScreen::renderSettings() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   // Center the title horizontally
   {
     const char* title = "Settings";
@@ -87,20 +91,6 @@ void SettingsScreen::renderSettings() {
     int16_t rowY = startY + i * lineHeight;
     textRenderer.setCursor(centerX, rowY);
     textRenderer.print(displayName);
-  }
-
-  // Draw battery percentage at bottom
-  {
-    textRenderer.setFont(&MenuFontSmall);  // Always use small font for battery
-    int pct = g_battery.readPercentage();
-    String pctStr = String(pct) + "%";
-    int16_t bx1, by1;
-    uint16_t bw, bh;
-    textRenderer.getTextBounds(pctStr.c_str(), 0, 0, &bx1, &by1, &bw, &bh);
-    int16_t bx = (480 - (int)bw) / 2;
-    int16_t by = 790;
-    textRenderer.setCursor(bx, by);
-    textRenderer.print(pctStr);
   }
 }
 

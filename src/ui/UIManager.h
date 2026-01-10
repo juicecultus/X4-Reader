@@ -66,6 +66,8 @@ class UIManager {
   bool getClockHM(int& hourOut, int& minuteOut);
   String getClockString();
 
+  void renderStatusHeader(TextRenderer& renderer);
+
   void trySyncTimeFromNtp();
 
  private:

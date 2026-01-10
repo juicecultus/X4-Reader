@@ -14,6 +14,7 @@
 
 #include "core/ImageDecoder.h"
 #include "core/Settings.h"
+#include "core/BatteryMonitor.h"
 #include "resources/images/bebop_image.h"
 #include "ui/screens/FileBrowserScreen.h"
 #include "ui/screens/ImageViewerScreen.h"
@@ -25,6 +26,8 @@
 #include "ui/screens/WifiPasswordEntryScreen.h"
 #include "ui/screens/WifiSettingsScreen.h"
 #include "ui/screens/WifiSsidSelectScreen.h"
+
+#include <resources/fonts/other/MenuFontSmall.h>
 
 RTC_DATA_ATTR static int32_t g_lastSleepCoverIndex = -1;
 RTC_DATA_ATTR static int64_t g_lastGoodEpochSec = 0;
@@ -447,6 +450,76 @@ String UIManager::getClockString() {
 
   ntpTimeValid = false;
   return String("--:--");
+}
+
+void UIManager::renderStatusHeader(TextRenderer& renderer) {
+  renderer.setFont(&MenuFontSmall);
+
+  {
+    String t = getClockString();
+    renderer.setCursor(10, 35);
+    renderer.print(t);
+  }
+
+  int pct = (int)g_battery.readPercentage();
+  if (pct < 0)
+    pct = 0;
+  if (pct > 100)
+    pct = 100;
+  String pctStr = String(pct) + "%";
+
+  int16_t tx1, ty1;
+  uint16_t tw, th;
+  renderer.getTextBounds(pctStr.c_str(), 0, 0, &tx1, &ty1, &tw, &th);
+
+  const int16_t marginRight = 10;
+  const int16_t baselineY = 35;
+  const int16_t iconW = 22;
+  const int16_t iconH = 12;
+  const int16_t nubW = 3;
+  const int16_t nubH = 6;
+  const int16_t gap = 4;
+
+  int16_t groupW = iconW + gap + (int16_t)tw;
+  int16_t groupX = 480 - marginRight - groupW;
+  if (groupX < 0)
+    groupX = 0;
+
+  int16_t iconX = groupX;
+  int16_t iconTop = baselineY - iconH + 1;
+  int16_t textX = iconX + iconW + gap;
+
+  for (int16_t x = 0; x < iconW; ++x) {
+    renderer.drawPixel(iconX + x, iconTop, true);
+    renderer.drawPixel(iconX + x, iconTop + iconH - 1, true);
+  }
+  for (int16_t y = 0; y < iconH; ++y) {
+    renderer.drawPixel(iconX, iconTop + y, true);
+    renderer.drawPixel(iconX + iconW - 1, iconTop + y, true);
+  }
+
+  int16_t nubX = iconX + iconW;
+  int16_t nubTop = iconTop + (iconH - nubH) / 2;
+  for (int16_t x = 0; x < nubW; ++x) {
+    for (int16_t y = 0; y < nubH; ++y) {
+      renderer.drawPixel(nubX + x, nubTop + y, true);
+    }
+  }
+
+  int16_t innerW = iconW - 2;
+  int16_t fillW = (int16_t)((innerW * pct) / 100);
+  if (fillW < 0)
+    fillW = 0;
+  if (fillW > innerW)
+    fillW = innerW;
+  for (int16_t x = 0; x < fillW; ++x) {
+    for (int16_t y = 0; y < iconH - 2; ++y) {
+      renderer.drawPixel(iconX + 1 + x, iconTop + 1 + y, true);
+    }
+  }
+
+  renderer.setCursor(textX, baselineY);
+  renderer.print(pctStr);
 }
 
 void UIManager::trySyncTimeFromNtp() {

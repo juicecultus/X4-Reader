@@ -73,6 +73,10 @@ void ClockSettingsScreen::render() {
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
 
+  uiManager.renderStatusHeader(textRenderer);
+
+  textRenderer.setFont(getTitleFont());
+
   {
     const char* title = "Clock";
     int16_t x1, y1;
