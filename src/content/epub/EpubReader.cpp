@@ -611,7 +611,19 @@ bool EpubReader::extractFile(const char* filename) {
   uint32_t minFree = ESP.getMinFreeHeap();
   Serial.printf("  Memory before extraction: Free=%u, Total=%u, MinFree=%u\n", heapBefore, heapSize, minFree);
 
-  err = epub_extract_streaming(reader_, fileIndex, extract_to_file_callback, nullptr, 4096);
+  // Heap can be fragmented (especially after clearing cache). The DEFLATE
+  // path needs a contiguous allocation of ~32KB(dict) + chunk_size + overhead.
+  // Retry with smaller chunk sizes on OOM to reduce the contiguous requirement.
+  const size_t chunkSizes[] = {4096, 2048, 1024, 512};
+  err = EPUB_ERROR_OUT_OF_MEMORY;
+  for (size_t i = 0; i < (sizeof(chunkSizes) / sizeof(chunkSizes[0])); i++) {
+    const size_t cs = chunkSizes[i];
+    err = epub_extract_streaming(reader_, fileIndex, extract_to_file_callback, nullptr, cs);
+    if (err != EPUB_ERROR_OUT_OF_MEMORY) {
+      break;
+    }
+    Serial.printf("  WARNING: OOM extracting with chunk_size=%u, retrying smaller...\n", (unsigned)cs);
+  }
 
   // Log memory state after extraction and show delta
   uint32_t heapAfter = ESP.getFreeHeap();
