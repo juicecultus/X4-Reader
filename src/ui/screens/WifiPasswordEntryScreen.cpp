@@ -18,8 +18,8 @@ static const char kKeyShift = '\x04';
 static const char kKeySym = '\x05';
 
 static const char kKeyboardAlpha[kKeyboardRowCount][kKeyboardCols] = {
-    // Row0: digits + symbols toggle at end
-    {'1', '2', '3', '4', '5', '6', '7', '8', '9', kKeySym},
+    // Row0: digits
+    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},
     // Row1
     {'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'},
     // Row2
@@ -27,16 +27,16 @@ static const char kKeyboardAlpha[kKeyboardRowCount][kKeyboardCols] = {
     // Row3
     {kKeyShift, 'z', 'x', 'c', 'v', 'b', 'n', 'm', '-', '_'},
     // Row4
-    {kKeyOk, kKeySpace, '.', '@', '/', '\\', ':', ';', ',', '!'},
+    {kKeyOk, kKeySpace, '.', '@', '/', '\\', ':', ';', kKeySym, '!'},
 };
 
 // Symbols layout: keep digits top row, make rest punctuation-heavy.
 static const char kKeyboardSym[kKeyboardRowCount][kKeyboardCols] = {
-    {'1', '2', '3', '4', '5', '6', '7', '8', '9', kKeySym},
+    {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0'},
     {'!', '@', '#', '$', '%', '^', '&', '*', '(', ')'},
     {'-', '_', '=', '+', '[', ']', '{', '}', '\\', kKeyDel},
     {kKeyShift, '<', '>', '?', '/', '|', '~', '`', '"', '\''},
-    {kKeyOk, kKeySpace, '.', ',', ':', ';', ' ', ' ', ' ', ' '},
+    {kKeyOk, kKeySpace, '.', ',', ':', ';', kKeySym, '!', '&', '='},
 };
 
 static char getKeyAt(bool symbols, bool caps, int row, int col) {
@@ -56,13 +56,13 @@ static const char* getKeyLabel(char key, bool symbols, bool caps) {
     case kKeyOk:
       return "OK";
     case kKeyDel:
-      return "DEL";
+      return "DL";
     case kKeySpace:
-      return "SPACE";
+      return "SP";
     case kKeyShift:
-      return "SHIFT";
+      return "SH";
     case kKeySym:
-      return "SYM";
+      return "SY";
     default:
       return nullptr;
   }
