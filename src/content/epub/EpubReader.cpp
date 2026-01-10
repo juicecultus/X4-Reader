@@ -523,6 +523,8 @@ bool EpubReader::isFileExtracted(const char* filename) {
 bool EpubReader::extractFile(const char* filename) {
   Serial.printf("\n=== Extracting %s ===\n", filename);
 
+  bool ok = false;
+
   // Open EPUB if not already open
   if (!openEpub()) {
     return false;
@@ -533,6 +535,7 @@ bool EpubReader::extractFile(const char* filename) {
   epub_error err = epub_locate_file(reader_, filename, &fileIndex);
   if (err != EPUB_OK) {
     Serial.printf("ERROR: File not found in EPUB: %s\n", filename);
+    closeEpub();
     return false;
   }
 
@@ -541,6 +544,7 @@ bool EpubReader::extractFile(const char* filename) {
   err = epub_get_file_info(reader_, fileIndex, &info);
   if (err != EPUB_OK) {
     Serial.printf("ERROR: Failed to get file info: %s\n", epub_get_error_string(err));
+    closeEpub();
     return false;
   }
 
@@ -564,6 +568,7 @@ bool EpubReader::extractFile(const char* filename) {
       if (!SD.exists(subDir.c_str())) {
         if (!SD.mkdir(subDir.c_str())) {
           Serial.printf("ERROR: Failed to create directory %s\n", subDir.c_str());
+          closeEpub();
           return false;
         }
       }
@@ -578,6 +583,7 @@ bool EpubReader::extractFile(const char* filename) {
   g_extract_file = SD.open(extractPath.c_str(), FILE_WRITE);
   if (!g_extract_file) {
     Serial.printf("ERROR: Failed to open file for writing: %s\n", extractPath.c_str());
+    closeEpub();
     return false;
   }
 
@@ -600,11 +606,18 @@ bool EpubReader::extractFile(const char* filename) {
 
   if (err != EPUB_OK) {
     Serial.printf("ERROR: Extraction failed: %s\n", epub_get_error_string(err));
-    return false;
+    goto cleanup;
   }
 
   Serial.printf("Successfully extracted %s\n", filename);
-  return true;
+  ok = true;
+
+cleanup:
+  closeEpub();
+  if (!ok) {
+    SD.remove(extractPath.c_str());
+  }
+  return ok;
 }
 
 String EpubReader::getFile(const char* filename) {

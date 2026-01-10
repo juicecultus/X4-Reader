@@ -988,7 +988,7 @@ bool EpubWordProvider::convertXhtmlStreamToTxt(const char* epubFilename, String&
     }
   }
 
-  epub_stream_context* epubStream = epubReader_->startStreaming(epubFilename, 8192);
+  epub_stream_context* epubStream = epubReader_->startStreaming(epubFilename, 4096);
   unsigned long startStreamingMs = millis() - t0;
   if (timings)
     timings->startStream = startStreamingMs;
