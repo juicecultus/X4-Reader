@@ -73,7 +73,8 @@ void UIManager::begin() {
     }
   }
   // Initialize screens using generic Screen interface
-  for (auto const& [id, p] : screens) {
+  for (auto it = screens.begin(); it != screens.end(); ++it) {
+    Screen* p = it->second.get();
     if (p)
       p->begin();
   }
