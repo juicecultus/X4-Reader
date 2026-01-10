@@ -48,6 +48,8 @@ class UIManager {
   bool getClockHM(int& hourOut, int& minuteOut);
   String getClockString();
 
+  void trySyncTimeFromNtp();
+
  private:
   EInkDisplay& display;
   SDCardManager& sdManager;
@@ -56,6 +58,8 @@ class UIManager {
   bool clockValid = false;
   int32_t clockBaseMinutes = 0;
   uint32_t clockBaseMillis = 0;
+
+  bool ntpTimeValid = false;
 
   ScreenId currentScreen = ScreenId::FileBrowser;
   ScreenId previousScreen = ScreenId::FileBrowser;

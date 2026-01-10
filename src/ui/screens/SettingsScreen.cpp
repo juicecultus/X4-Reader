@@ -22,41 +22,6 @@ void SettingsScreen::begin() {
 }
 
 void SettingsScreen::handleButtons(Buttons& buttons) {
-  if (editingTime) {
-    if (buttons.isPressed(Buttons::BACK)) {
-      editingTime = false;
-      show();
-      return;
-    } else if (buttons.isPressed(Buttons::LEFT)) {
-      if (clockField == 0) {
-        clockHour = (clockHour + 1) % 24;
-      } else {
-        clockMinute = (clockMinute + 1) % 60;
-      }
-      show();
-      return;
-    } else if (buttons.isPressed(Buttons::RIGHT)) {
-      if (clockField == 0) {
-        clockHour = (clockHour + 23) % 24;
-      } else {
-        clockMinute = (clockMinute + 59) % 60;
-      }
-      show();
-      return;
-    } else if (buttons.isPressed(Buttons::CONFIRM)) {
-      if (clockField == 0) {
-        clockField = 1;
-      } else {
-        clockField = 0;
-        editingTime = false;
-        uiManager.setClockHM(clockHour, clockMinute);
-        saveSettings();
-      }
-      show();
-      return;
-    }
-  }
-
   if (buttons.isPressed(Buttons::BACK)) {
     saveSettings();
     // Return to the screen we came from
@@ -140,8 +105,6 @@ void SettingsScreen::renderSettings() {
 }
 
 void SettingsScreen::selectNext() {
-  if (editingTime)
-    return;
   selectedIndex++;
   if (selectedIndex >= SETTINGS_COUNT)
     selectedIndex = 0;
@@ -149,8 +112,6 @@ void SettingsScreen::selectNext() {
 }
 
 void SettingsScreen::selectPrev() {
-  if (editingTime)
-    return;
   selectedIndex--;
   if (selectedIndex < 0)
     selectedIndex = SETTINGS_COUNT - 1;
@@ -196,22 +157,15 @@ void SettingsScreen::toggleCurrentSetting() {
     case 7:  // Random Sleep Cover
       randomSleepCoverIndex = 1 - randomSleepCoverIndex;
       break;
-    case 8:  // Time
-      editingTime = true;
-      clockField = 0;
-      {
-        int h = 0;
-        int m = 0;
-        if (uiManager.getClockHM(h, m)) {
-          clockHour = h;
-          clockMinute = m;
-        } else {
-          clockHour = 0;
-          clockMinute = 0;
-        }
-      }
+    case 8:  // WiFi
+      wifiEnabledIndex = 1 - wifiEnabledIndex;
       break;
-    case 9:  // Clear Cache
+    case 9:  // Timezone
+      tzOffsetHours++;
+      if (tzOffsetHours > 14)
+        tzOffsetHours = -12;
+      break;
+    case 10:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
   }
@@ -280,13 +234,20 @@ void SettingsScreen::loadSettings() {
     randomSleepCoverIndex = randomSleepCover;
   }
 
-  {
-    int h = 0;
-    int m = 0;
-    if (uiManager.getClockHM(h, m)) {
-      clockHour = h;
-      clockMinute = m;
-    }
+  // Load WiFi enabled (0=OFF, 1=ON)
+  int wifiEnabled = 0;
+  if (s.getInt(String("wifi.enabled"), wifiEnabled)) {
+    wifiEnabledIndex = wifiEnabled ? 1 : 0;
+  }
+
+  // Load timezone offset in seconds (default 0)
+  int gmtOffset = 0;
+  if (s.getInt(String("wifi.gmtOffset"), gmtOffset)) {
+    tzOffsetHours = gmtOffset / 3600;
+    if (tzOffsetHours < -12)
+      tzOffsetHours = -12;
+    if (tzOffsetHours > 14)
+      tzOffsetHours = 14;
   }
 
   // Apply the loaded font settings
@@ -306,14 +267,9 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.uiFontSize"), uiFontSizeIndex);
   s.setInt(String("settings.randomSleepCover"), randomSleepCoverIndex);
 
-  {
-    int h = 0;
-    int m = 0;
-    if (uiManager.getClockHM(h, m)) {
-      s.setInt(String("clock.hour"), h);
-      s.setInt(String("clock.minute"), m);
-    }
-  }
+  s.setInt(String("wifi.enabled"), wifiEnabledIndex);
+  s.setInt(String("wifi.gmtOffset"), tzOffsetHours * 3600);
+  s.setInt(String("wifi.daylightOffset"), 0);
 
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
@@ -339,8 +295,10 @@ String SettingsScreen::getSettingName(int index) {
     case 7:
       return "Random Sleep Cover";
     case 8:
-      return "Time";
+      return "WiFi";
     case 9:
+      return "Timezone";
+    case 10:
       return "Clear Cache";
     default:
       return "";
@@ -391,29 +349,14 @@ String SettingsScreen::getSettingValue(int index) {
     case 7:
       return randomSleepCoverIndex ? "On" : "Off";
     case 8:
+      return wifiEnabledIndex ? "On" : "Off";
+    case 9:
       {
-        int h = clockHour;
-        int m = clockMinute;
-        bool ok = true;
-        if (!editingTime) {
-          ok = uiManager.getClockHM(h, m);
-        }
-
-        if (!ok && !editingTime) {
-          return "--:--";
-        }
-
         char buf[10];
-        if (editingTime && clockField == 0) {
-          snprintf(buf, sizeof(buf), "[%02d]:%02d", h, m);
-        } else if (editingTime && clockField == 1) {
-          snprintf(buf, sizeof(buf), "%02d:[%02d]", h, m);
-        } else {
-          snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
-        }
+        snprintf(buf, sizeof(buf), "UTC%+d", tzOffsetHours);
         return String(buf);
       }
-    case 9:
+    case 10:
       if (clearCacheStatus < 0)
         return "";
       return clearCacheStatus ? "OK" : "FAIL";

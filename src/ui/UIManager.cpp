@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <resources/fonts/FontManager.h>
 
+#include <WiFi.h>
+#include <time.h>
+
 #include <esp_system.h>
 
 #include "core/ImageDecoder.h"
@@ -42,6 +45,9 @@ void UIManager::begin() {
     if (settings)
       settings->load();
   }
+
+  // Attempt WiFi + NTP time sync early so the clock is available on the first render.
+  trySyncTimeFromNtp();
 
   // Restore soft clock (HH:MM) from consolidated settings
   if (sdManager.ready() && settings) {
@@ -244,6 +250,19 @@ bool UIManager::getClockHM(int& hourOut, int& minuteOut) {
 }
 
 String UIManager::getClockString() {
+  if (ntpTimeValid) {
+    time_t now = time(nullptr);
+    // Treat anything before 2020-01-01 as invalid / unsynced
+    if (now > 1577836800) {
+      struct tm tmNow;
+      localtime_r(&now, &tmNow);
+      char buf[6];
+      snprintf(buf, sizeof(buf), "%02d:%02d", tmNow.tm_hour, tmNow.tm_min);
+      return String(buf);
+    }
+    ntpTimeValid = false;
+  }
+
   int h = 0;
   int m = 0;
   if (!getClockHM(h, m)) {
@@ -252,6 +271,65 @@ String UIManager::getClockString() {
   char buf[6];
   snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
   return String(buf);
+}
+
+void UIManager::trySyncTimeFromNtp() {
+  ntpTimeValid = false;
+  if (!sdManager.ready() || !settings) {
+    return;
+  }
+
+  int wifiEnabled = 0;
+  (void)settings->getInt(String("wifi.enabled"), wifiEnabled);
+  if (wifiEnabled == 0) {
+    return;
+  }
+
+  String ssid = settings->getString(String("wifi.ssid"));
+  String pass = settings->getString(String("wifi.pass"));
+  if (ssid.length() == 0) {
+    Serial.println("UIManager: WiFi enabled but wifi.ssid missing");
+    return;
+  }
+
+  int gmtOffset = 0;
+  int daylightOffset = 0;
+  (void)settings->getInt(String("wifi.gmtOffset"), gmtOffset);
+  (void)settings->getInt(String("wifi.daylightOffset"), daylightOffset);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(true);
+  Serial.printf("UIManager: WiFi connecting to '%s'...\n", ssid.c_str());
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 8000) {
+    delay(50);
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.printf("UIManager: WiFi connect failed (status=%d)\n", (int)WiFi.status());
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
+
+  Serial.printf("UIManager: WiFi connected, IP=%s\n", WiFi.localIP().toString().c_str());
+  configTime((long)gmtOffset, (int)daylightOffset, "pool.ntp.org", "time.nist.gov", "time.google.com");
+
+  struct tm tmNow;
+  if (getLocalTime(&tmNow, 6000)) {
+    ntpTimeValid = true;
+    Serial.printf("UIManager: NTP time synced: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  tmNow.tm_year + 1900, tmNow.tm_mon + 1, tmNow.tm_mday, tmNow.tm_hour, tmNow.tm_min, tmNow.tm_sec);
+  } else {
+    Serial.println("UIManager: NTP sync failed (getLocalTime timeout)");
+    ntpTimeValid = false;
+  }
+
+  // We no longer need WiFi after initial sync.
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
 }
 
 void UIManager::openTextFile(const String& sdPath) {
