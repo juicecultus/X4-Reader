@@ -619,6 +619,57 @@ String EpubWordProvider::decodeHtmlEntity(const String& entity) {
     return "\"";
   if (entity == "&apos;")
     return "'";
+  if (entity.startsWith("&#") && entity.endsWith(";")) {
+    String num = entity.substring(2, entity.length() - 1);
+    num.trim();
+
+    int base = 10;
+    if (num.startsWith("x") || num.startsWith("X")) {
+      base = 16;
+      num = num.substring(1);
+    }
+
+    long code = 0;
+    bool ok = (num.length() > 0);
+    for (int i = 0; ok && i < num.length(); ++i) {
+      char c = num.charAt(i);
+      int v = -1;
+      if (c >= '0' && c <= '9') {
+        v = c - '0';
+      } else if (base == 16 && c >= 'a' && c <= 'f') {
+        v = 10 + (c - 'a');
+      } else if (base == 16 && c >= 'A' && c <= 'F') {
+        v = 10 + (c - 'A');
+      }
+      if (v < 0 || v >= base) {
+        ok = false;
+        break;
+      }
+      code = code * base + v;
+      if (code > 0x10FFFF) {
+        ok = false;
+        break;
+      }
+    }
+
+    if (ok) {
+      if (code == 13) {
+        return "";
+      }
+      if (code == 10) {
+        return "\n";
+      }
+      if (code == 160) {
+        return "\xC2\xA0";
+      }
+      if (code >= 32 && code <= 126) {
+        char out[2];
+        out[0] = (char)code;
+        out[1] = '\0';
+        return String(out);
+      }
+    }
+  }
   // Unknown entity - return as-is
   return entity;
 }
