@@ -14,6 +14,8 @@
 constexpr int SettingsScreen::marginValues[];
 constexpr int SettingsScreen::lineHeightValues[];
 
+static const char* kTextChoices = "[OK][DEL] abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.@+/\\:";
+
 SettingsScreen::SettingsScreen(EInkDisplay& display, TextRenderer& renderer, UIManager& uiManager)
     : display(display), textRenderer(renderer), uiManager(uiManager) {}
 
@@ -22,6 +24,64 @@ void SettingsScreen::begin() {
 }
 
 void SettingsScreen::handleButtons(Buttons& buttons) {
+  if (editingText) {
+    int choicesLen = (int)strlen(kTextChoices);
+    if (buttons.isPressed(Buttons::BACK)) {
+      editingText = false;
+      editBuffer = editOriginal;
+      show();
+      return;
+    } else if (buttons.isPressed(Buttons::LEFT)) {
+      editChoiceIndex++;
+      if (editChoiceIndex >= choicesLen)
+        editChoiceIndex = 0;
+      show();
+      return;
+    } else if (buttons.isPressed(Buttons::RIGHT)) {
+      editChoiceIndex--;
+      if (editChoiceIndex < 0)
+        editChoiceIndex = choicesLen - 1;
+      show();
+      return;
+    } else if (buttons.isPressed(Buttons::CONFIRM)) {
+      // First 4 chars in kTextChoices encode [OK]
+      if (editChoiceIndex >= 0 && editChoiceIndex <= 3) {
+        // Commit
+        if (editingKey == 0) {
+          wifiSsid = editBuffer;
+        } else {
+          wifiPass = editBuffer;
+        }
+        editingText = false;
+        saveSettings();
+        if (wifiEnabledIndex) {
+          uiManager.trySyncTimeFromNtp();
+        }
+        show();
+        return;
+      }
+      // Next 5 chars encode [DEL]
+      if (editChoiceIndex >= 4 && editChoiceIndex <= 8) {
+        if (editBuffer.length() > 0) {
+          editBuffer.remove(editBuffer.length() - 1);
+        }
+        show();
+        return;
+      }
+
+      // Regular character
+      char c = kTextChoices[editChoiceIndex];
+      // Avoid adding bracket marker chars from [OK]/[DEL]
+      if (c != '[' && c != ']' && c != 'O' && c != 'K' && c != 'D' && c != 'E' && c != 'L') {
+        if (editBuffer.length() < 64) {
+          editBuffer += c;
+        }
+      }
+      show();
+      return;
+    }
+  }
+
   if (buttons.isPressed(Buttons::BACK)) {
     saveSettings();
     // Return to the screen we came from
@@ -105,6 +165,8 @@ void SettingsScreen::renderSettings() {
 }
 
 void SettingsScreen::selectNext() {
+  if (editingText)
+    return;
   selectedIndex++;
   if (selectedIndex >= SETTINGS_COUNT)
     selectedIndex = 0;
@@ -112,6 +174,8 @@ void SettingsScreen::selectNext() {
 }
 
 void SettingsScreen::selectPrev() {
+  if (editingText)
+    return;
   selectedIndex--;
   if (selectedIndex < 0)
     selectedIndex = SETTINGS_COUNT - 1;
@@ -165,7 +229,21 @@ void SettingsScreen::toggleCurrentSetting() {
       if (tzOffsetHours > 14)
         tzOffsetHours = -12;
       break;
-    case 10:  // Clear Cache
+    case 10:  // WiFi SSID
+      editingText = true;
+      editingKey = 0;
+      editOriginal = wifiSsid;
+      editBuffer = wifiSsid;
+      editChoiceIndex = 0;
+      break;
+    case 11:  // WiFi Password
+      editingText = true;
+      editingKey = 1;
+      editOriginal = wifiPass;
+      editBuffer = wifiPass;
+      editChoiceIndex = 0;
+      break;
+    case 12:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
   }
@@ -240,6 +318,9 @@ void SettingsScreen::loadSettings() {
     wifiEnabledIndex = wifiEnabled ? 1 : 0;
   }
 
+  wifiSsid = s.getString(String("wifi.ssid"));
+  wifiPass = s.getString(String("wifi.pass"));
+
   // Load timezone offset in seconds (default 0)
   int gmtOffset = 0;
   if (s.getInt(String("wifi.gmtOffset"), gmtOffset)) {
@@ -271,6 +352,9 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("wifi.gmtOffset"), tzOffsetHours * 3600);
   s.setInt(String("wifi.daylightOffset"), 0);
 
+  s.setString(String("wifi.ssid"), wifiSsid);
+  s.setString(String("wifi.pass"), wifiPass);
+
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
   }
@@ -299,6 +383,10 @@ String SettingsScreen::getSettingName(int index) {
     case 9:
       return "Timezone";
     case 10:
+      return "WiFi SSID";
+    case 11:
+      return "WiFi Password";
+    case 12:
       return "Clear Cache";
     default:
       return "";
@@ -357,6 +445,39 @@ String SettingsScreen::getSettingValue(int index) {
         return String(buf);
       }
     case 10:
+      if (editingText && editingKey == 0) {
+        String v = editBuffer;
+        if (v.length() > 18)
+          v = v.substring(0, 18) + "...";
+        return v;
+      }
+      {
+        String v = wifiSsid;
+        if (v.length() == 0)
+          v = "";
+        if (v.length() > 18)
+          v = v.substring(0, 18) + "...";
+        return v;
+      }
+    case 11:
+      if (editingText && editingKey == 1) {
+        String v = editBuffer;
+        if (v.length() > 18)
+          v = v.substring(0, 18) + "...";
+        return v;
+      }
+      {
+        if (wifiPass.length() == 0)
+          return "";
+        int n = wifiPass.length();
+        String stars;
+        for (int i = 0; i < n && i < 12; ++i)
+          stars += "*";
+        if (n > 12)
+          stars += "...";
+        return stars;
+      }
+    case 12:
       if (clearCacheStatus < 0)
         return "";
       return clearCacheStatus ? "OK" : "FAIL";
