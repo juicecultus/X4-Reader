@@ -28,15 +28,14 @@ class WifiPasswordEntryScreen : public Screen {
   String wifiPass;
   String editOriginal;
   String editBuffer;
-  int choiceIndex = 0;
+  int keyRow = 0;
+  int keyCol = 0;
 
   void loadSettings();
   void saveSettings();
   void render();
 
-  void nextChoice();
-  void prevChoice();
-  void choose();
+  void chooseKey();
 };
 
 #endif
