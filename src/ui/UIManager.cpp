@@ -17,6 +17,7 @@
 #include "resources/images/bebop_image.h"
 #include "ui/screens/FileBrowserScreen.h"
 #include "ui/screens/ImageViewerScreen.h"
+#include "ui/screens/ChaptersScreen.h"
 #include "ui/screens/SettingsScreen.h"
 #include "ui/screens/TextViewerScreen.h"
 #include "ui/screens/ClockSettingsScreen.h"
@@ -171,6 +172,7 @@ UIManager::UIManager(EInkDisplay& display, SDCardManager& sdManager)
   screens[ScreenId::TextViewer] =
       std::unique_ptr<Screen>(new TextViewerScreen(display, textRenderer, sdManager, *this));
   screens[ScreenId::Settings] = std::unique_ptr<Screen>(new SettingsScreen(display, textRenderer, *this));
+  screens[ScreenId::Chapters] = std::unique_ptr<Screen>(new ChaptersScreen(display, textRenderer, *this));
   screens[ScreenId::ClockSettings] =
       std::unique_ptr<Screen>(new ClockSettingsScreen(display, textRenderer, *this));
   screens[ScreenId::WifiSettings] =
@@ -585,7 +587,7 @@ void UIManager::showScreen(ScreenId id) {
   if (id == ScreenId::Settings && currentScreen != ScreenId::Settings) {
     if (currentScreen != ScreenId::WifiSettings && currentScreen != ScreenId::WifiSsidSelect &&
         currentScreen != ScreenId::WifiPasswordEntry && currentScreen != ScreenId::ClockSettings &&
-        currentScreen != ScreenId::TimezoneSelect) {
+        currentScreen != ScreenId::TimezoneSelect && currentScreen != ScreenId::Chapters) {
       settingsReturnScreen = currentScreen;
     }
   }

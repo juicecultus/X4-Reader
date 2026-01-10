@@ -18,6 +18,7 @@ class FileBrowserScreen;
 class ImageViewerScreen;
 class TextViewerScreen;
 class SettingsScreen;
+class ChaptersScreen;
 class WifiSettingsScreen;
 class WifiSsidSelectScreen;
 class WifiPasswordEntryScreen;
@@ -34,6 +35,7 @@ class UIManager {
     ImageViewer,
     TextViewer,
     Settings,
+    Chapters,
     ClockSettings,
     WifiSettings,
     WifiSsidSelect,

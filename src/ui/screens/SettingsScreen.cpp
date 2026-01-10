@@ -170,6 +170,11 @@ void SettingsScreen::toggleCurrentSetting() {
     case 10:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
+    case 11:  // TOC
+      saveSettings();
+      uiManager.showScreen(UIManager::ScreenId::Chapters);
+      return;
+      break;
   }
   saveSettings();
   show();
@@ -282,6 +287,8 @@ String SettingsScreen::getSettingName(int index) {
       return "WiFi";
     case 10:
       return "Clear Cache";
+    case 11:
+      return "TOC";
     default:
       return "";
   }
@@ -336,8 +343,10 @@ String SettingsScreen::getSettingValue(int index) {
       return "Setup";
     case 10:
       if (clearCacheStatus < 0)
-        return "";
+        return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
+    case 11:
+      return "Open";
     default:
       return "";
   }

@@ -24,6 +24,16 @@ static Language stringToLanguage(const String& langStr) {
   }
 }
 
+String EpubWordProvider::getChapterName(int chapterIndex) {
+  if (!isEpub_ || !epubReader_) {
+    return String("");
+  }
+  if (chapterIndex < 0 || chapterIndex >= epubReader_->getSpineCount()) {
+    return String("");
+  }
+  return epubReader_->getChapterNameForSpine(chapterIndex);
+}
+
 EpubWordProvider::EpubWordProvider(const char* path, size_t bufSize)
     : bufSize_(bufSize), fileSize_(0), currentChapter_(0) {
   epubPath_ = String(path);
@@ -593,7 +603,7 @@ String EpubWordProvider::readAndDecodeText(SimpleXmlParser& parser) {
         char next = parser.peekTextNodeChar();
         entity += next;
         parser.readTextNodeCharForward();
-        if (next == ';' || entity.length() > 10) {
+        if (next == ';' || entity.length() > 32) {
           break;
         }
       }
@@ -619,6 +629,28 @@ String EpubWordProvider::decodeHtmlEntity(const String& entity) {
     return "\"";
   if (entity == "&apos;")
     return "'";
+  if (entity == "&rsquo;" || entity == "&lsquo;")
+    return "'";
+  if (entity == "&rdquo;" || entity == "&ldquo;")
+    return "\"";
+  if (entity == "&ndash;" || entity == "&mdash;")
+    return "-";
+  if (entity == "&hellip;")
+    return "...";
+  if (entity == "&lsaquo;" || entity == "&rsaquo;")
+    return "\"";
+  if (entity == "&laquo;" || entity == "&raquo;")
+    return "\"";
+  if (entity == "&shy;")
+    return "";
+  if (entity == "&thinsp;" || entity == "&ensp;" || entity == "&emsp;" || entity == "&nbsp;")
+    return " ";
+  if (entity == "&copy;")
+    return "(c)";
+  if (entity == "&reg;")
+    return "(r)";
+  if (entity == "&trade;")
+    return "(tm)";
   if (entity.startsWith("&#") && entity.endsWith(";")) {
     String num = entity.substring(2, entity.length() - 1);
     num.trim();
@@ -661,6 +693,51 @@ String EpubWordProvider::decodeHtmlEntity(const String& entity) {
       }
       if (code == 160) {
         return "\xC2\xA0";
+      }
+      if (code == 173) {
+        return "";
+      }
+      if (code == 65279) {
+        return "";
+      }
+      if (code == 8203 || code == 8204 || code == 8205) {
+        return "";
+      }
+      if (code == 8216 || code == 8217) {
+        return "'";
+      }
+      if (code == 8218) {
+        return ",";
+      }
+      if (code == 8220 || code == 8221) {
+        return "\"";
+      }
+      if (code == 8222) {
+        return "\"";
+      }
+      if (code == 8230) {
+        return "...";
+      }
+      if (code == 8208 || code == 8209 || code == 8210 || code == 8211 || code == 8212) {
+        return "-";
+      }
+      if (code == 8242) {
+        return "'";
+      }
+      if (code == 8243) {
+        return "\"";
+      }
+      if (code == 8249 || code == 8250) {
+        return "\"";
+      }
+      if (code == 8226) {
+        return "-";
+      }
+      if (code == 8239 || code == 8194 || code == 8195 || code == 8201 || code == 8202) {
+        return " ";
+      }
+      if (code == 8232 || code == 8233) {
+        return "\n";
       }
       if (code >= 32 && code <= 126) {
         char out[2];

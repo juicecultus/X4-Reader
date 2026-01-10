@@ -107,6 +107,12 @@ class WordProvider {
     return String("");
   }
 
+  // Returns the name/title of a specific chapter by index (empty string if not available)
+  virtual String getChapterName(int chapterIndex) {
+    (void)chapterIndex;
+    return String("");
+  }
+
   // Style support - returns the currently active style for styling words
   // The default implementation returns a default style (left-aligned)
   virtual CssStyle getCurrentStyle() {

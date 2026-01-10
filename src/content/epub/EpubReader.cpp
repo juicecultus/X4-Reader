@@ -25,6 +25,128 @@ static bool strcasecmp_helper(const String& str1, const char* str2) {
   return true;
 }
 
+static String decodeHtmlEntityForToc(const String& entity) {
+  if (entity == "&nbsp;")
+    return "\xC2\xA0";
+  if (entity == "&amp;")
+    return "&";
+  if (entity == "&lt;")
+    return "<";
+  if (entity == "&gt;")
+    return ">";
+  if (entity == "&quot;")
+    return "\"";
+  if (entity == "&apos;")
+    return "'";
+  if (entity == "&rsquo;" || entity == "&lsquo;")
+    return "'";
+  if (entity == "&rdquo;" || entity == "&ldquo;")
+    return "\"";
+  if (entity == "&ndash;" || entity == "&mdash;")
+    return "-";
+  if (entity == "&hellip;")
+    return "...";
+  if (entity == "&shy;")
+    return "";
+
+  if (entity.startsWith("&#") && entity.endsWith(";")) {
+    String num = entity.substring(2, entity.length() - 1);
+    num.trim();
+
+    int base = 10;
+    if (num.startsWith("x") || num.startsWith("X")) {
+      base = 16;
+      num = num.substring(1);
+    }
+
+    long code = 0;
+    bool ok = (num.length() > 0);
+    for (int i = 0; ok && i < num.length(); ++i) {
+      char c = num.charAt(i);
+      int v = -1;
+      if (c >= '0' && c <= '9') {
+        v = c - '0';
+      } else if (base == 16 && c >= 'a' && c <= 'f') {
+        v = 10 + (c - 'a');
+      } else if (base == 16 && c >= 'A' && c <= 'F') {
+        v = 10 + (c - 'A');
+      }
+      if (v < 0 || v >= base) {
+        ok = false;
+        break;
+      }
+      code = code * base + v;
+      if (code > 0x10FFFF) {
+        ok = false;
+        break;
+      }
+    }
+
+    if (ok) {
+      if (code == 13)
+        return "";
+      if (code == 10)
+        return "\n";
+      if (code == 160)
+        return "\xC2\xA0";
+      if (code == 173)
+        return "";
+      if (code == 65279)
+        return "";
+      if (code == 8203 || code == 8204 || code == 8205)
+        return "";
+      if (code == 8216 || code == 8217)
+        return "'";
+      if (code == 8220 || code == 8221)
+        return "\"";
+      if (code == 8230)
+        return "...";
+      if (code == 8208 || code == 8209 || code == 8210 || code == 8211 || code == 8212)
+        return "-";
+      if (code >= 32 && code <= 126) {
+        char out[2];
+        out[0] = (char)code;
+        out[1] = '\0';
+        return String(out);
+      }
+    }
+  }
+
+  return entity;
+}
+
+static String decodeHtmlEntitiesInTextForToc(const String& input) {
+  String out;
+  out.reserve(input.length());
+
+  for (int i = 0; i < input.length(); ++i) {
+    char c = input.charAt(i);
+    if (c != '&') {
+      out += c;
+      continue;
+    }
+
+    String entity = "&";
+    int j = i + 1;
+    for (; j < input.length(); ++j) {
+      char nc = input.charAt(j);
+      entity += nc;
+      if (nc == ';' || entity.length() > 32) {
+        break;
+      }
+    }
+
+    if (j < input.length()) {
+      out += decodeHtmlEntityForToc(entity);
+      i = j;
+    } else {
+      out += '&';
+    }
+  }
+
+  return out;
+}
+
 // Helper function to find next element with given name
 static bool findNextElement(SimpleXmlParser* parser, const char* elementName) {
   while (parser->read()) {
@@ -1060,9 +1182,24 @@ bool EpubReader::parseTocNcx() {
         while (parser->hasMoreTextChars()) {
           char c = parser->readTextNodeCharForward();
           if (c != '\0') {
-            currentTitle += c;
+            if (c == '&') {
+              String entity = "&";
+              while (parser->hasMoreTextChars()) {
+                char next = parser->peekTextNodeChar();
+                entity += next;
+                parser->readTextNodeCharForward();
+                if (next == ';' || entity.length() > 32) {
+                  break;
+                }
+              }
+              currentTitle += decodeHtmlEntityForToc(entity);
+            } else {
+              currentTitle += c;
+            }
           }
         }
+
+        currentTitle = decodeHtmlEntitiesInTextForToc(currentTitle);
       }
       expectingText = false;
     } else if (nodeType == SimpleXmlParser::EndElement) {

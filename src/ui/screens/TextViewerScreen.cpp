@@ -127,6 +127,44 @@ void TextViewerScreen::activate() {
   }
 }
 
+int TextViewerScreen::getChapterCount() const {
+  if (!provider) {
+    return 0;
+  }
+  if (provider->hasChapters()) {
+    return provider->getChapterCount();
+  }
+  return 1;
+}
+
+String TextViewerScreen::getChapterName(int chapterIndex) const {
+  if (!provider) {
+    return String("");
+  }
+  return provider->getChapterName(chapterIndex);
+}
+
+void TextViewerScreen::goToChapterStart(int chapterIndex) {
+  if (!provider) {
+    return;
+  }
+
+  if (provider->hasChapters()) {
+    if (!provider->setChapter(chapterIndex)) {
+      return;
+    }
+  } else {
+    if (chapterIndex != 0) {
+      return;
+    }
+    provider->setPosition(0);
+  }
+
+  pageStartIndex = 0;
+  pageEndIndex = 0;
+  showPage();
+}
+
 // Ensure member function is in class scope
 void TextViewerScreen::handleButtons(Buttons& buttons) {
   // Long press threshold in milliseconds

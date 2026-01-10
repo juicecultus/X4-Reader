@@ -50,6 +50,7 @@ class EpubWordProvider : public WordProvider {
   String getCurrentChapterName() override {
     return currentChapterName_;
   }
+  String getChapterName(int chapterIndex) override;
 
   // Get the language of the EPUB for hyphenation
   Language getLanguage() const;

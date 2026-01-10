@@ -27,6 +27,10 @@ class TextViewerScreen : public Screen {
   void jumpToNextChapter();
   void jumpToPreviousChapter();
 
+  int getChapterCount() const;
+  String getChapterName(int chapterIndex) const;
+  void goToChapterStart(int chapterIndex);
+
   void showPage();
 
   // Generic show renders the current page
