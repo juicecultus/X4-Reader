@@ -326,8 +326,13 @@ void TextViewerScreen::showPage() {
     if (!hasDrawableText) {
       String coverPath = provider->getCoverImagePath();
       if (coverPath.length() > 0 && SD.exists(coverPath.c_str())) {
+        // Best-effort: free shared EPUB buffers before attempting decode.
+        epub_release_shared_buffers();
+
         const uint32_t freeHeap = ESP.getFreeHeap();
-        if (freeHeap >= 60000) {
+        if (freeHeap < 35000) {
+          Serial.printf("Skipping cover render due to low heap (Free=%u)\n", (unsigned)freeHeap);
+        } else {
           sdManager.ensureSpiBusIdle();
           display.clearScreen(0xFF);
           if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
@@ -335,6 +340,7 @@ void TextViewerScreen::showPage() {
             display.displayBuffer(EInkDisplay::FAST_REFRESH);
             return;
           }
+          Serial.println("Failed to decode EPUB cover image");
         }
       }
     }
