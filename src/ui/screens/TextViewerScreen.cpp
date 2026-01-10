@@ -49,6 +49,15 @@ TextViewerScreen::~TextViewerScreen() {
   delete provider;
 }
 
+void TextViewerScreen::closeDocument() {
+  delete provider;
+  provider = nullptr;
+  loadedText = String("");
+  currentFilePath = String("");
+  noDocumentMessage = String("");
+  epub_release_shared_buffers();
+}
+
 void TextViewerScreen::begin() {
   // Load last opened file path if present
   Settings& s = uiManager.getSettings();
@@ -189,12 +198,9 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
     savePositionToFile();
     saveSettingsToFile();
 
-    // Aggressively release memory so opening an uncached large EPUB has the
-    // best chance of succeeding under fragmented heap conditions.
-    delete provider;
-    provider = nullptr;
-    loadedText = String("");
-    epub_release_shared_buffers();
+    // Aggressively release memory so cover decode (sleep) and large uncached
+    // EPUB opens have the best chance of succeeding.
+    closeDocument();
 
     uiManager.showScreen(UIManager::ScreenId::FileBrowser);
   } else if (buttons.isPressed(Buttons::CONFIRM)) {

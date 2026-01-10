@@ -442,6 +442,15 @@ void UIManager::prepareForSleep() {
   // persist any state (e.g. current reading position).
   if (screens[currentScreen])
     screens[currentScreen]->shutdown();
+
+  // After state is persisted, aggressively free reader resources so the sleep
+  // screen cover render has as much heap as possible.
+  if (currentScreen == ScreenId::TextViewer) {
+    TextViewerScreen* tv = static_cast<TextViewerScreen*>(screens[ScreenId::TextViewer].get());
+    if (tv) {
+      tv->closeDocument();
+    }
+  }
   // Persist which screen was active so we can restore it on next boot.
   if (sdManager.ready() && settings) {
     settings->setInt(String("ui.screen"), static_cast<int>(currentScreen));
