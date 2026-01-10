@@ -6,6 +6,8 @@
 #include <WiFi.h>
 #include <time.h>
 
+#include <esp_wifi.h>
+
 #include <esp_system.h>
 
 #include "core/ImageDecoder.h"
@@ -309,7 +311,31 @@ void UIManager::trySyncTimeFromNtp() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(true);
   Serial.printf("UIManager: WiFi connecting to '%s'...\n", ssid.c_str());
-  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  // Connect using esp-idf config to force WPA2-only and avoid WPA3/SAE crashes.
+  // This also prevents PMF from being required (some APs can misbehave).
+  wifi_config_t cfg;
+  memset(&cfg, 0, sizeof(cfg));
+  strncpy((char*)cfg.sta.ssid, ssid.c_str(), sizeof(cfg.sta.ssid) - 1);
+  strncpy((char*)cfg.sta.password, pass.c_str(), sizeof(cfg.sta.password) - 1);
+  cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+  cfg.sta.pmf_cfg.capable = true;
+  cfg.sta.pmf_cfg.required = false;
+
+  esp_err_t rc = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+  if (rc != ESP_OK) {
+    Serial.printf("UIManager: esp_wifi_set_config failed rc=%d\n", (int)rc);
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
+  rc = esp_wifi_connect();
+  if (rc != ESP_OK) {
+    Serial.printf("UIManager: esp_wifi_connect failed rc=%d\n", (int)rc);
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
 
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED && (millis() - start) < 8000) {
