@@ -698,8 +698,21 @@ void UIManager::trySyncTimeFromNtp() {
         Serial.println("UIManager: Failed to persist synced clock to settings.cfg");
       }
     }
-    if (currentScreen == ScreenId::FileBrowser) {
-      screens[currentScreen]->show();
+    switch (currentScreen) {
+      case ScreenId::FileBrowser:
+      case ScreenId::Settings:
+      case ScreenId::Chapters:
+      case ScreenId::ClockSettings:
+      case ScreenId::WifiSettings:
+      case ScreenId::WifiSsidSelect:
+      case ScreenId::WifiPasswordEntry:
+      case ScreenId::TimezoneSelect:
+        if (screens[currentScreen]) {
+          screens[currentScreen]->show();
+        }
+        break;
+      default:
+        break;
     }
     Serial.printf("UIManager: NTP time synced (epoch=%lld)\n", (long long)epochSec);
   } else {
