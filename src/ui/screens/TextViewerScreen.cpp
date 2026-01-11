@@ -1,6 +1,7 @@
 #include "TextViewerScreen.h"
 
 #include <Arduino.h>
+#include <SD.h>
 #include <resources/fonts/FontDefinitions.h>
 #include <resources/fonts/FontManager.h>
 #include <resources/fonts/other/MenuFontSmall.h>
@@ -19,6 +20,96 @@
 #include "../../text/layout/GreedyLayoutStrategy.h"
 #include "../../text/layout/KnuthPlassLayoutStrategy.h"
 #include "SettingsScreen.h"
+#include "core/ImageDecoder.h"
+
+static uint32_t fnv1a32_tv(const char* s) {
+  uint32_t h = 2166136261u;
+  if (!s) {
+    return h;
+  }
+  while (*s) {
+    h ^= (uint8_t)(*s++);
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static bool writeBmp24TopDownFromFb(const char* path, const uint8_t* fb, uint16_t w, uint16_t h) {
+  if (!path || !fb || w == 0 || h == 0) {
+    return false;
+  }
+
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    return false;
+  }
+
+  const uint32_t rowStride = ((uint32_t)w * 3u + 3u) & ~3u;
+  const uint32_t pixelBytes = rowStride * (uint32_t)h;
+  const uint32_t fileSize = 14u + 40u + pixelBytes;
+
+  uint8_t fileHdr[14] = {'B', 'M', 0, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0};
+  fileHdr[2] = (uint8_t)(fileSize & 0xFF);
+  fileHdr[3] = (uint8_t)((fileSize >> 8) & 0xFF);
+  fileHdr[4] = (uint8_t)((fileSize >> 16) & 0xFF);
+  fileHdr[5] = (uint8_t)((fileSize >> 24) & 0xFF);
+
+  uint8_t dib[40];
+  memset(dib, 0, sizeof(dib));
+  dib[0] = 40;
+  // width
+  dib[4] = (uint8_t)(w & 0xFF);
+  dib[5] = (uint8_t)((w >> 8) & 0xFF);
+  // height (negative for top-down)
+  int32_t negH = -(int32_t)h;
+  dib[8] = (uint8_t)(negH & 0xFF);
+  dib[9] = (uint8_t)((negH >> 8) & 0xFF);
+  dib[10] = (uint8_t)((negH >> 16) & 0xFF);
+  dib[11] = (uint8_t)((negH >> 24) & 0xFF);
+  dib[12] = 1;
+  dib[14] = 24;
+  dib[20] = (uint8_t)(pixelBytes & 0xFF);
+  dib[21] = (uint8_t)((pixelBytes >> 8) & 0xFF);
+  dib[22] = (uint8_t)((pixelBytes >> 16) & 0xFF);
+  dib[23] = (uint8_t)((pixelBytes >> 24) & 0xFF);
+
+  if (f.write(fileHdr, sizeof(fileHdr)) != sizeof(fileHdr) || f.write(dib, sizeof(dib)) != sizeof(dib)) {
+    f.close();
+    return false;
+  }
+
+  uint8_t* row = (uint8_t*)malloc(rowStride);
+  if (!row) {
+    f.close();
+    return false;
+  }
+  memset(row, 0xFF, rowStride);
+
+  const uint32_t rowBytesFb = (uint32_t)((w + 7) / 8);
+  for (uint16_t y = 0; y < h; ++y) {
+    memset(row, 0xFF, rowStride);
+    const uint32_t fbRowStart = (uint32_t)y * rowBytesFb;
+    for (uint16_t x = 0; x < w; ++x) {
+      const uint32_t fbByte = fbRowStart + (uint32_t)(x / 8);
+      const uint8_t fbBit = 7 - (uint8_t)(x % 8);
+      const bool isWhite = ((fb[fbByte] >> fbBit) & 1) != 0;
+      const uint8_t v = isWhite ? 255 : 0;
+      const uint32_t off = (uint32_t)x * 3u;
+      row[off + 0] = v;
+      row[off + 1] = v;
+      row[off + 2] = v;
+    }
+    if (f.write(row, rowStride) != rowStride) {
+      free(row);
+      f.close();
+      return false;
+    }
+  }
+
+  free(row);
+  f.close();
+  return true;
+}
 
 TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer, SDCardManager& sdManager,
                                    UIManager& uiManager)
@@ -613,7 +704,23 @@ void TextViewerScreen::openFile(const String& sdPath) {
       String coverPath = ep->getCoverImagePath();
       Settings& s = uiManager.getSettings();
       if (coverPath.length() > 0) {
-        s.setString(String("textviewer.lastCoverPath"), coverPath);
+        // Generate a fast-to-decode cached BMP cover for the sleep screen.
+        (void)sdManager.ensureDirectoryExists("/microreader/epub_covers");
+        const uint32_t key = fnv1a32_tv(sdPath.c_str());
+        String cachedPath = String("/microreader/epub_covers/") + String(key, HEX) + String(".bmp");
+
+        bool ok = false;
+        sdManager.ensureSpiBusIdle();
+        if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
+          sdManager.ensureSpiBusIdle();
+          ok = writeBmp24TopDownFromFb(cachedPath.c_str(), display.getFrameBuffer(), 480, 800);
+        }
+
+        if (ok) {
+          s.setString(String("textviewer.lastCoverPath"), cachedPath);
+        } else {
+          s.setString(String("textviewer.lastCoverPath"), coverPath);
+        }
       } else {
         s.setString(String("textviewer.lastCoverPath"), String(""));
       }
