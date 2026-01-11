@@ -10,7 +10,8 @@
 #include <time.h>
 #include <sys/time.h>
 
-#include <esp_sntp.h>
+#include <esp_sleep.h>
+#include <esp_heap_caps.h>
 
 #include <esp_system.h>
 
@@ -32,8 +33,38 @@
 
 #include <resources/fonts/other/MenuFontSmall.h>
 
+#include "content/epub/EpubReader.h"
+
 RTC_DATA_ATTR static int32_t g_lastSleepCoverIndex = -1;
 RTC_DATA_ATTR static int64_t g_lastGoodEpochSec = 0;
+
+static uint32_t fnv1a32_ui(const char* s) {
+  uint32_t h = 2166136261u;
+  if (!s) {
+    return h;
+  }
+  while (*s) {
+    h ^= (uint8_t)(*s++);
+    h *= 16777619u;
+  }
+  return h;
+}
+
+static bool writeRawBufferToFile_ui(const char* path, const uint8_t* buf, size_t len) {
+  if (!path || !buf || len == 0) {
+    return false;
+  }
+  if (SD.exists(path)) {
+    SD.remove(path);
+  }
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    return false;
+  }
+  const size_t n = f.write(buf, len);
+  f.close();
+  return n == len;
+}
 
 static int buildMonthToIndex(const char* mon) {
   if (!mon)
@@ -341,6 +372,20 @@ void UIManager::showSleepScreen() {
   display.clearScreen(0xFF);
 
   bool usedRandomCover = false;
+  bool haveDecodedGrayscale = false;
+  uint8_t* decodedGrayLsb = nullptr;
+  uint8_t* decodedGrayMsb = nullptr;
+  bool coverIsBmp = false;
+  String coverBmpPath;
+  bool wantCacheBundle = false;
+  bool wroteCacheBw = false;
+  bool wroteCacheLsb = false;
+  bool wroteCacheMsb = false;
+  String cacheBase;
+  String cacheGcvPath;
+  String cacheBwPath;
+  String cacheLsbPath;
+  String cacheMsbPath;
   int sleepMode = 0;
   if (settings) {
     (void)settings->getInt(String("settings.sleepScreenMode"), sleepMode);
@@ -353,18 +398,123 @@ void UIManager::showSleepScreen() {
       // before we touch SD during shutdown.
       sdManager.ensureSpiBusIdle();
     }
+
+    // If caller saved a non-extracting cover path, it may not exist yet.
+    // Try to extract it on-demand using the last EPUB path.
+    if (coverPath.length() > 0 && !SD.exists(coverPath.c_str())) {
+      const String lf = String(coverPath).substring(std::max(0, (int)coverPath.length() - 4));
+      const bool maybeCoverFile = coverPath.indexOf(String("/microreader/epub_")) == 0;
+      if (maybeCoverFile) {
+        const String epubPath = settings->getString(String("textviewer.lastEpubPath"), String(""));
+        if (epubPath.length() > 0 && SD.exists(epubPath.c_str())) {
+          Serial.printf("[%lu]   Sleep cover missing on disk; extracting on-demand...\n", millis());
+          // Keep this conservative: extraction allocates; skip if heap is extremely low.
+          const uint32_t freeHeap = ESP.getFreeHeap();
+          const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+          if (freeHeap > 90000 && largest > 60000) {
+            sdManager.ensureSpiBusIdle();
+            EpubReader er(epubPath.c_str());
+            if (er.isValid()) {
+              String extracted = er.getCoverImagePath(true);
+              if (extracted.length() > 0 && SD.exists(extracted.c_str())) {
+                coverPath = extracted;
+                settings->setString(String("textviewer.lastCoverPath"), coverPath);
+                (void)settings->save();
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (coverPath.length() > 0 && SD.exists(coverPath.c_str())) {
       Serial.printf("Selecting book cover sleep screen: %s\n", coverPath.c_str());
-      // JPEG/PNG decode can allocate internally and may throw/abort under low memory.
-      // If heap is low, skip cover decode and fall back to the built-in sleep image.
-      const uint32_t freeHeap = ESP.getFreeHeap();
-      if (freeHeap < 60000) {
-        Serial.printf("Skipping book cover sleep screen decode due to low heap (Free=%u)\n", (unsigned)freeHeap);
-      } else {
-        if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800)) {
-          usedRandomCover = true;
+
+      String lf = coverPath;
+      lf.toLowerCase();
+
+      // Fast path: cached raw grayscale cover bundle.
+      // Marker file: /microreader/epub_covers/<key>.gcv
+      // Data files:  /microreader/epub_covers/<key>.bw/.lsb/.msb (each 48000 bytes)
+      if (lf.endsWith(".gcv")) {
+        String base = coverPath;
+        base.remove(base.length() - 4);
+        const String bwPath = base + String(".bw");
+        const String lsbPath = base + String(".lsb");
+        const String msbPath = base + String(".msb");
+
+        if (SD.exists(bwPath.c_str()) && SD.exists(lsbPath.c_str()) && SD.exists(msbPath.c_str())) {
+          sdManager.ensureSpiBusIdle();
+          File bw = SD.open(bwPath.c_str(), FILE_READ);
+          if (bw) {
+            const size_t n = bw.read(display.getFrameBuffer(), EInkDisplay::BUFFER_SIZE);
+            bw.close();
+            if (n == EInkDisplay::BUFFER_SIZE) {
+              usedRandomCover = true;
+              coverBmpPath = coverPath;
+              coverIsBmp = false;
+            } else {
+              Serial.printf("[%lu]   Sleep cover cached BW read short (%u/%u)\n", millis(), (unsigned)n,
+                            (unsigned)EInkDisplay::BUFFER_SIZE);
+            }
+          }
+        }
+      }
+
+      if (!usedRandomCover) {
+        coverBmpPath = coverPath;
+        coverIsBmp = lf.endsWith(".bmp");
+
+        // JPEG/PNG decode can allocate internally; if heap is extremely low, skip decode.
+        const uint32_t freeHeap = ESP.getFreeHeap();
+        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        Serial.printf("[%lu]   Sleep cover heap before decode: Free=%u\n", millis(), (unsigned)freeHeap);
+        Serial.printf("[%lu]   Sleep cover heap largest free block: %u\n", millis(), (unsigned)largest);
+        if (freeHeap < 60000) {
+          Serial.printf("Skipping book cover sleep screen decode due to low heap (Free=%u)\n", (unsigned)freeHeap);
         } else {
-          Serial.println("Failed to decode book cover sleep screen");
+          // Guard against heap fragmentation: JPEG/PNG decode can require a contiguous block.
+          // If we don't have enough contiguous memory, skip cover instead of crashing.
+          if (!coverIsBmp && !lf.endsWith(".gcv") && largest < 80000) {
+            Serial.printf("Skipping book cover sleep screen decode due to fragmented heap (Largest=%u)\n",
+                          (unsigned)largest);
+          } else {
+          // Decode BW only here. Grayscale overlay is applied later.
+          if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800)) {
+            usedRandomCover = true;
+
+            // If this is a JPG/PNG cover, prepare a fast raw bundle cache during sleep.
+            // We do it here (instead of EPUB-open) to avoid stability issues during open.
+            if (!coverIsBmp && !lf.endsWith(".gcv")) {
+              const bool isJpgPng = lf.endsWith(".jpg") || lf.endsWith(".jpeg") || lf.endsWith(".png");
+              if (isJpgPng) {
+                (void)sdManager.ensureDirectoryExists("/microreader/epub_covers");
+                const uint32_t key = fnv1a32_ui(coverPath.c_str());
+                cacheBase = String("/microreader/epub_covers/") + String(key, HEX);
+                cacheGcvPath = cacheBase + String(".gcv");
+                cacheBwPath = cacheBase + String(".bw");
+                cacheLsbPath = cacheBase + String(".lsb");
+                cacheMsbPath = cacheBase + String(".msb");
+
+                // Only build cache if not already present.
+                if (!(SD.exists(cacheGcvPath.c_str()) && SD.exists(cacheBwPath.c_str()) && SD.exists(cacheLsbPath.c_str()) &&
+                      SD.exists(cacheMsbPath.c_str()))) {
+                  wantCacheBundle = true;
+                  sdManager.ensureSpiBusIdle();
+                  wroteCacheBw = writeRawBufferToFile_ui(cacheBwPath.c_str(), display.getFrameBuffer(), EInkDisplay::BUFFER_SIZE);
+                  if (!wroteCacheBw) {
+                    Serial.printf("[%lu]   Sleep cover cache: failed writing BW %s\n", millis(), cacheBwPath.c_str());
+                    wantCacheBundle = false;
+                  } else {
+                    Serial.printf("[%lu]   Sleep cover cache: wrote BW %s\n", millis(), cacheBwPath.c_str());
+                  }
+                }
+              }
+            }
+          } else {
+            Serial.println("Failed to decode book cover sleep screen");
+          }
+          }
         }
       }
     }
@@ -424,11 +574,42 @@ void UIManager::showSleepScreen() {
 
         // decodeToDisplay writes directly to the buffer we pass it.
         // We pass the current back buffer (which display.getFrameBuffer() returns).
-        if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getFrameBuffer(), 480, 800)) {
+        const uint32_t freeHeap = ESP.getFreeHeap();
+        uint8_t* grayLsb = nullptr;
+        uint8_t* grayMsb = nullptr;
+        if (display.supportsGrayscale() && freeHeap > 180000) {
+          grayLsb = (uint8_t*)malloc(EInkDisplay::BUFFER_SIZE);
+          grayMsb = (uint8_t*)malloc(EInkDisplay::BUFFER_SIZE);
+          if (!grayLsb || !grayMsb) {
+            free(grayLsb);
+            free(grayMsb);
+            grayLsb = nullptr;
+            grayMsb = nullptr;
+          } else {
+            memset(grayLsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+            memset(grayMsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+          }
+        }
+
+        if (ImageDecoder::decodeToDisplay(selected.c_str(), display.getFrameBuffer(), 480, 800, grayLsb, grayMsb)) {
           usedRandomCover = true;
           g_lastSleepCoverIndex = idx;
+
+          if (grayLsb && grayMsb) {
+            haveDecodedGrayscale = true;
+            decodedGrayLsb = grayLsb;
+            decodedGrayMsb = grayMsb;
+            grayLsb = nullptr;
+            grayMsb = nullptr;
+          }
+
+          free(grayLsb);
+          free(grayMsb);
           break;
         }
+
+        free(grayLsb);
+        free(grayMsb);
         Serial.println("Failed to decode random sleep cover");
       }
     }
@@ -464,10 +645,152 @@ void UIManager::showSleepScreen() {
   // without another clearScreen/swap would happen on the old front buffer.
   // But we are entering deep sleep, so this is the final state.
   
-  if (!usedRandomCover && display.supportsGrayscale()) {
-    display.copyGrayscaleBuffers(bebop_image_lsb, bebop_image_msb);
-    display.displayGrayBuffer(true);
+  if (display.supportsGrayscale()) {
+    // If we decoded grayscale buffers earlier, copy them AFTER the BW full refresh.
+    // displayBuffer() writes RED RAM and can overwrite any earlier grayscale plane copies.
+    if (haveDecodedGrayscale && decodedGrayLsb && decodedGrayMsb) {
+      display.copyGrayscaleBuffers(decodedGrayLsb, decodedGrayMsb);
+      display.displayGrayBuffer(true);
+    } else if (usedRandomCover && coverBmpPath.length() > 0) {
+      String lf = coverBmpPath;
+      lf.toLowerCase();
+
+      if (lf.endsWith(".gcv")) {
+        String base = coverBmpPath;
+        base.remove(base.length() - 4);
+        const String lsbPath = base + String(".lsb");
+        const String msbPath = base + String(".msb");
+
+        uint8_t* mask = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+        if (mask) {
+          File f = SD.open(lsbPath.c_str(), FILE_READ);
+          if (f) {
+            const size_t n = f.read(mask, EInkDisplay::BUFFER_SIZE);
+            f.close();
+            if (n == EInkDisplay::BUFFER_SIZE) {
+              display.copyGrayscaleLsbBuffers(mask);
+            } else {
+              Serial.printf("[%lu]   Sleep cover cached LSB read short (%u/%u)\n", millis(), (unsigned)n,
+                            (unsigned)EInkDisplay::BUFFER_SIZE);
+            }
+          }
+          free(mask);
+        }
+
+        mask = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+        if (mask) {
+          File f = SD.open(msbPath.c_str(), FILE_READ);
+          if (f) {
+            const size_t n = f.read(mask, EInkDisplay::BUFFER_SIZE);
+            f.close();
+            if (n == EInkDisplay::BUFFER_SIZE) {
+              display.copyGrayscaleMsbBuffers(mask);
+            } else {
+              Serial.printf("[%lu]   Sleep cover cached MSB read short (%u/%u)\n", millis(), (unsigned)n,
+                            (unsigned)EInkDisplay::BUFFER_SIZE);
+            }
+          }
+          free(mask);
+        }
+
+        display.displayGrayBuffer(true);
+      } else if (coverIsBmp) {
+      // Crosspoint-style grayscale pipeline for BMP covers without extra 48KB allocations:
+      // decode plane into framebuffer, copy to display RAM, repeat for MSB.
+      display.clearScreen(0x00);
+      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, 0x01)) {
+        display.copyGrayscaleLsbBuffers(display.getFrameBuffer());
+      }
+      display.clearScreen(0x00);
+      if (ImageDecoder::decodeBmpPlaneFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, 0x02)) {
+        display.copyGrayscaleMsbBuffers(display.getFrameBuffer());
+      }
+      display.displayGrayBuffer(true);
+      } else {
+      // Heap-fragmentation-safe grayscale path for JPG/PNG:
+      // allocate one 48KB mask buffer at a time, decode into it, copy to RAM, free, repeat.
+      uint8_t* mask = nullptr;
+
+      Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) LSB decode start\n", millis());
+      mask = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+      if (mask) {
+        memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
+        // Decode fills mask semantics (LSB=dark only) when only grayscaleLsbBuffer is provided.
+        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, mask, nullptr);
+        display.copyGrayscaleLsbBuffers(mask);
+
+        if (wantCacheBundle) {
+          sdManager.ensureSpiBusIdle();
+          wroteCacheLsb = writeRawBufferToFile_ui(cacheLsbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
+          if (!wroteCacheLsb) {
+            Serial.printf("[%lu]   Sleep cover cache: failed writing LSB %s\n", millis(), cacheLsbPath.c_str());
+          } else {
+            Serial.printf("[%lu]   Sleep cover cache: wrote LSB %s\n", millis(), cacheLsbPath.c_str());
+          }
+        }
+
+        free(mask);
+      } else {
+        Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) LSB mask alloc failed\n", millis());
+      }
+      Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) LSB decode done\n", millis());
+
+      Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) MSB decode start\n", millis());
+      mask = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+      if (mask) {
+        memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
+        // Decode fills mask semantics (MSB=dark+light) when only grayscaleMsbBuffer is provided.
+        (void)ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(), 480, 800, nullptr, mask);
+        display.copyGrayscaleMsbBuffers(mask);
+
+        if (wantCacheBundle) {
+          sdManager.ensureSpiBusIdle();
+          wroteCacheMsb = writeRawBufferToFile_ui(cacheMsbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
+          if (!wroteCacheMsb) {
+            Serial.printf("[%lu]   Sleep cover cache: failed writing MSB %s\n", millis(), cacheMsbPath.c_str());
+          } else {
+            Serial.printf("[%lu]   Sleep cover cache: wrote MSB %s\n", millis(), cacheMsbPath.c_str());
+          }
+        }
+
+        free(mask);
+      } else {
+        Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) MSB mask alloc failed\n", millis());
+      }
+      Serial.printf("[%lu]   Sleep grayscale (JPG/PNG) MSB decode done\n", millis());
+
+      if (wantCacheBundle && wroteCacheBw && wroteCacheLsb && wroteCacheMsb) {
+        sdManager.ensureSpiBusIdle();
+        if (SD.exists(cacheGcvPath.c_str())) {
+          SD.remove(cacheGcvPath.c_str());
+        }
+        File marker = SD.open(cacheGcvPath.c_str(), FILE_WRITE);
+        if (marker) {
+          marker.close();
+        }
+        if (SD.exists(cacheGcvPath.c_str())) {
+          Serial.printf("[%lu]   Sleep cover cache: wrote marker %s\n", millis(), cacheGcvPath.c_str());
+          if (settings) {
+            settings->setString(String("textviewer.lastCoverPath"), cacheGcvPath);
+            (void)settings->save();
+          }
+        } else {
+          Serial.printf("[%lu]   Sleep cover cache: failed writing marker %s\n", millis(), cacheGcvPath.c_str());
+        }
+      }
+
+      Serial.printf("[%lu]   Sleep grayscale displayGrayBuffer start\n", millis());
+      display.displayGrayBuffer(true);
+      Serial.printf("[%lu]   Sleep grayscale displayGrayBuffer done\n", millis());
+      }
+    } else if (!usedRandomCover) {
+      display.copyGrayscaleBuffers(bebop_image_lsb, bebop_image_msb);
+      display.displayGrayBuffer(true);
+    }
   }
+
+  free(decodedGrayLsb);
+  free(decodedGrayMsb);
 }
 
 void UIManager::prepareForSleep() {

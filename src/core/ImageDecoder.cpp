@@ -1,5 +1,7 @@
 #include "ImageDecoder.h"
 
+#include "EInkDisplay.h"
+
 #include <new>
 
 static const char* pngErrName(int err) {
@@ -46,6 +48,385 @@ static uint32_t rd32le(const uint8_t* p) {
 
 static int32_t rd32sle(const uint8_t* p) {
     return (int32_t)rd32le(p);
+}
+
+static inline uint8_t quantize4(uint8_t lum) {
+    // Match crosspoint 2bpp interpretation used by its Bitmap/GfxRenderer pipeline:
+    // 0 = black, 1 = dark gray, 2 = light gray, 3 = white
+    if (lum < 43) {
+        return 0;
+    }
+    if (lum < 128) {
+        return 1;
+    }
+    if (lum < 213) {
+        return 2;
+    }
+    return 3;
+}
+
+static inline void writePackedBit(uint8_t* buf, int byteIdx, int bitIdx, bool one) {
+    if (!buf) {
+        return;
+    }
+    if (one) {
+        buf[byteIdx] |= (1 << bitIdx);
+    } else {
+        buf[byteIdx] &= ~(1 << bitIdx);
+    }
+}
+
+bool ImageDecoder::decodeBmpPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                         uint8_t planeMask) {
+    return decodeBMPToPlaneFitWidth(path, planeBuffer, targetWidth, targetHeight, planeMask);
+}
+
+bool ImageDecoder::decodePlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                      uint8_t planeMask) {
+    if (!path || !planeBuffer) {
+        return false;
+    }
+    String p = String(path);
+    p.toLowerCase();
+    if (p.endsWith(".bmp")) {
+        return decodeBMPToPlaneFitWidth(path, planeBuffer, targetWidth, targetHeight, planeMask);
+    }
+
+    // For JPG/PNG we reuse the existing decodeToDisplayFitWidth pipeline, but
+    // enable planeMaskMode so callbacks write a grayscale mask into frameBuffer.
+    // Caller should clear planeBuffer to 0x00 before calling.
+    memset(planeBuffer, 0x00, EInkDisplay::BUFFER_SIZE);
+
+    int16_t* errorBuffer = (int16_t*)calloc((size_t)targetWidth * 2, sizeof(int16_t));
+    if (!errorBuffer) {
+        Serial.println("ImageDecoder: OOM allocating error buffer (planeFitWidth)");
+        return false;
+    }
+    DecodeContext* ctx = new (std::nothrow) DecodeContext();
+    if (!ctx) {
+        free(errorBuffer);
+        return false;
+    }
+
+    ctx->frameBuffer = planeBuffer;
+    ctx->grayscaleLsbBuffer = nullptr;
+    ctx->grayscaleMsbBuffer = nullptr;
+    ctx->planeMaskMode = true;
+    ctx->planeMask = planeMask;
+    ctx->targetWidth = targetWidth;
+    ctx->targetHeight = targetHeight;
+    ctx->offsetX = 0;
+    ctx->offsetY = 0;
+    ctx->decodedWidth = 0;
+    ctx->decodedHeight = 0;
+    ctx->renderWidth = 0;
+    ctx->renderHeight = 0;
+    ctx->rotateSource90 = false;
+    ctx->scaleToWidth = true;
+    ctx->errorBuf = errorBuffer;
+    ctx->pngLineBuf = nullptr;
+    ctx->pngLineBufPixels = 0;
+    ctx->success = false;
+    g_ctx = ctx;
+
+    bool ok = false;
+
+    if (p.endsWith(".jpg") || p.endsWith(".jpeg")) {
+        JPEGDEC* jpeg = new (std::nothrow) JPEGDEC();
+        if (jpeg) {
+            File f = SD.open(path);
+            if (f) {
+                int rc = jpeg->open((void *)&f, (int)f.size(), [](void *p) { /* close */ },
+                               [](JPEGFILE *pfn, uint8_t *pBuf, int32_t iLen) -> int32_t {
+                                   if (!pfn || !pfn->fHandle) return -1;
+                                   File *file = (File *)pfn->fHandle;
+                                   return (int32_t)file->read(pBuf, (size_t)iLen);
+                               },
+                               [](JPEGFILE *pfn, int32_t iPos) -> int32_t {
+                                   if (!pfn || !pfn->fHandle) return -1;
+                                   File *file = (File *)pfn->fHandle;
+                                   return file->seek((uint32_t)iPos) ? 1 : 0;
+                               }, JPEGDraw);
+
+                if (rc) {
+                    jpeg->setPixelType(RGB565_LITTLE_ENDIAN);
+                    jpeg->setUserPointer(ctx);
+
+                    const int srcW = jpeg->getWidth();
+                    const int srcH = jpeg->getHeight();
+                    ctx->rotateSource90 = (targetHeight > targetWidth) && (srcW > srcH);
+
+                    struct ScaleOpt { int opt; int shift; };
+                    const ScaleOpt opts[] = {
+                        {JPEG_SCALE_EIGHTH, 3},
+                        {JPEG_SCALE_QUARTER, 2},
+                        {JPEG_SCALE_HALF, 1},
+                        {0, 0},
+                    };
+                    int scale = 0;
+                    int outW = srcW;
+                    int outH = srcH;
+                    for (size_t i = 0; i < (sizeof(opts) / sizeof(opts[0])); i++) {
+                        const int w = srcW >> opts[i].shift;
+                        const int h = srcH >> opts[i].shift;
+                        const int visW = ctx->rotateSource90 ? h : w;
+                        if (visW >= (int)targetWidth) {
+                            scale = opts[i].opt;
+                            outW = w;
+                            outH = h;
+                            break;
+                        }
+                    }
+                    ctx->decodedWidth = (uint16_t)outW;
+                    ctx->decodedHeight = (uint16_t)outH;
+                    const int srcVisW = ctx->rotateSource90 ? outH : outW;
+                    const int srcVisH = ctx->rotateSource90 ? outW : outH;
+                    const int outVisW = (int)targetWidth;
+                    const int outVisH = (srcVisW > 0) ? (int)((((int64_t)srcVisH) * (int64_t)outVisW) / (int64_t)srcVisW) : 0;
+                    ctx->renderWidth = (uint16_t)outVisW;
+                    ctx->renderHeight = (uint16_t)outVisH;
+                    ctx->offsetX = 0;
+                    ctx->offsetY = ((int)targetHeight - outVisH) / 2;
+
+                    jpeg->setMaxOutputSize(1);
+                    if (jpeg->decode(0, 0, scale)) {
+                        ctx->success = true;
+                        ok = true;
+                    }
+                    jpeg->close();
+                }
+
+                f.close();
+            }
+            delete jpeg;
+        }
+    } else if (p.endsWith(".png")) {
+        PNG* png = new (std::nothrow) PNG();
+        if (png) {
+            currentPNG = png;
+            int rc = png->open(path, [](const char *szFilename, int32_t *pFileSize) -> void * {
+                File *file = new (std::nothrow) File(SD.open(szFilename));
+                if (file && *file) {
+                    file->seek(0);
+                    *pFileSize = (int32_t)file->size();
+                    return (void *)file;
+                }
+                if (file) {
+                    file->close();
+                    delete file;
+                }
+                return NULL;
+            }, [](void *pHandle) {
+                File *file = (File *)pHandle;
+                if (file) {
+                    file->close();
+                    delete file;
+                }
+            }, [](PNGFILE *pfn, uint8_t *pBuffer, int32_t iLength) -> int32_t {
+                if (!pfn || !pfn->fHandle) return -1;
+                File *file = (File *)pfn->fHandle;
+                int32_t total = 0;
+                while (total < iLength) {
+                    int32_t n = (int32_t)file->read(pBuffer + total, (size_t)(iLength - total));
+                    if (n <= 0) break;
+                    total += n;
+                }
+                return total;
+            }, [](PNGFILE *pfn, int32_t iPos) -> int32_t {
+                if (!pfn || !pfn->fHandle) return -1;
+                File *file = (File *)pfn->fHandle;
+                return file->seek((uint32_t)iPos) ? iPos : -1;
+            }, [](PNGDRAW *pDraw) -> int {
+                // reuse the standard callback which supports planeMaskMode
+                ImageDecoder::PNGDraw(pDraw);
+                return 1;
+            });
+
+            if (rc == PNG_SUCCESS) {
+                int iw = png->getWidth();
+                int ih = png->getHeight();
+                ctx->rotateSource90 = false;
+                ctx->decodedWidth = (uint16_t)iw;
+                ctx->decodedHeight = (uint16_t)ih;
+                const int outW = (int)targetWidth;
+                const int outH = (iw > 0) ? (int)((((int64_t)ih) * (int64_t)outW) / (int64_t)iw) : 0;
+                ctx->renderWidth = (uint16_t)outW;
+                ctx->renderHeight = (uint16_t)outH;
+                ctx->offsetX = 0;
+                ctx->offsetY = ((int)targetHeight - outH) / 2;
+
+                rc = png->decode(ctx, 0);
+                if (rc == PNG_SUCCESS) {
+                    ctx->success = true;
+                    ok = true;
+                }
+                png->close();
+            }
+
+            currentPNG = nullptr;
+            delete png;
+        }
+    }
+
+    g_ctx = nullptr;
+    free(errorBuffer);
+    delete ctx;
+    return ok;
+}
+
+bool ImageDecoder::decodeBMPToPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                            uint8_t planeMask) {
+    if (!path || !planeBuffer || targetWidth == 0 || targetHeight == 0) {
+        return false;
+    }
+
+    String p = String(path);
+    p.toLowerCase();
+    if (!p.endsWith(".bmp")) {
+        return false;
+    }
+
+    File f = SD.open(path);
+    if (!f) {
+        Serial.printf("ImageDecoder: Failed to open %s\n", path);
+        return false;
+    }
+
+    // Crosspoint grayscale plane buffers are masks:
+    // 0 = do nothing, 1 = apply grayscale to that pixel.
+    // Start with all zeros.
+    memset(planeBuffer, 0x00, EInkDisplay::BUFFER_SIZE);
+
+    uint8_t hdr[54];
+    const int n = (int)f.read(hdr, sizeof(hdr));
+    if (n != (int)sizeof(hdr)) {
+        Serial.printf("ImageDecoder: BMP header too short (%d bytes)\n", n);
+        f.close();
+        return false;
+    }
+
+    if (hdr[0] != 'B' || hdr[1] != 'M') {
+        Serial.println("ImageDecoder: BMP invalid signature");
+        f.close();
+        return false;
+    }
+
+    const uint32_t dataOffset = rd32le(&hdr[10]);
+    const uint32_t dibSize = rd32le(&hdr[14]);
+    if (dibSize < 40) {
+        Serial.printf("ImageDecoder: BMP unsupported DIB header size %lu\n", (unsigned long)dibSize);
+        f.close();
+        return false;
+    }
+
+    const int32_t bmpW = rd32sle(&hdr[18]);
+    const int32_t bmpH = rd32sle(&hdr[22]);
+    const uint16_t planes = rd16le(&hdr[26]);
+    const uint16_t bpp = rd16le(&hdr[28]);
+    const uint32_t compression = rd32le(&hdr[30]);
+
+    if (bmpW <= 0 || bmpH == 0 || planes != 1) {
+        Serial.printf("ImageDecoder: BMP invalid dims w=%ld h=%ld planes=%u\n", (long)bmpW, (long)bmpH, (unsigned)planes);
+        f.close();
+        return false;
+    }
+
+    if (!(bpp == 24 || bpp == 32)) {
+        Serial.printf("ImageDecoder: BMP unsupported bpp=%u\n", (unsigned)bpp);
+        f.close();
+        return false;
+    }
+
+    if (compression != 0) {
+        Serial.printf("ImageDecoder: BMP unsupported compression=%lu\n", (unsigned long)compression);
+        f.close();
+        return false;
+    }
+
+    const bool topDown = (bmpH < 0);
+    const int32_t absH = topDown ? -bmpH : bmpH;
+
+    // Fit-to-width scaling, like our cover decode path.
+    const int outW = (int)targetWidth;
+    const int outH = (bmpW > 0) ? (int)((((int64_t)absH) * (int64_t)outW) / (int64_t)bmpW) : 0;
+    const int offsetX = 0;
+    const int offsetY = ((int)targetHeight - outH) / 2;
+
+    const uint32_t bytesPerPixel = (uint32_t)(bpp / 8);
+    const uint32_t rowStride = (uint32_t)(((uint32_t)bmpW * bytesPerPixel + 3) & ~3U);
+    uint8_t* row = (uint8_t*)malloc(rowStride);
+    if (!row) {
+        Serial.println("ImageDecoder: BMP OOM allocating row buffer (plane)");
+        f.close();
+        return false;
+    }
+
+    for (int dy = 0; dy < outH; ++dy) {
+        const int py = offsetY + dy;
+        if (py < 0 || py >= (int)targetHeight) continue;
+
+        int sy = (int)((((int64_t)dy) * (int64_t)absH) / (int64_t)outH);
+        if (sy < 0) sy = 0;
+        if (sy >= (int)absH) sy = (int)absH - 1;
+        const int32_t srcRow = topDown ? sy : ((int32_t)absH - 1 - sy);
+        const uint32_t rowPos = dataOffset + (uint32_t)srcRow * rowStride;
+        if (!f.seek(rowPos)) {
+            Serial.printf("ImageDecoder: BMP seek failed at plane row %d pos=%lu\n", dy, (unsigned long)rowPos);
+            free(row);
+            f.close();
+            return false;
+        }
+
+        const int32_t r = (int32_t)f.read(row, rowStride);
+        if (r != (int32_t)rowStride) {
+            Serial.printf("ImageDecoder: BMP short read plane row %d got=%ld need=%lu\n", dy, (long)r, (unsigned long)rowStride);
+            free(row);
+            f.close();
+            return false;
+        }
+
+        for (int dx = 0; dx < outW; ++dx) {
+            int sx = (int)((((int64_t)dx) * (int64_t)bmpW) / (int64_t)outW);
+            if (sx < 0) sx = 0;
+            if (sx >= (int)bmpW) sx = (int)bmpW - 1;
+
+            const uint8_t b = row[(uint32_t)sx * bytesPerPixel + 0];
+            const uint8_t g = row[(uint32_t)sx * bytesPerPixel + 1];
+            const uint8_t rr = row[(uint32_t)sx * bytesPerPixel + 2];
+            const uint32_t lum32 = (rr * 306U + g * 601U + b * 117U) >> 10;
+            const uint8_t lum = (lum32 > 255U) ? 255U : (uint8_t)lum32;
+            const uint8_t q = quantize4(lum);
+
+            const int px = offsetX + dx;
+            if (px < 0 || px >= (int)targetWidth) continue;
+
+            // portrait logical -> physical framebuffer mapping
+            const int fx = py;
+            const int fy = 479 - px;
+            if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) continue;
+
+            const int byteIdx = (fy * 100) + (fx / 8);
+            const int bitIdx = 7 - (fx % 8);
+            bool active = false;
+            // planeMask selects which pixels participate in the grayscale overlay.
+            // LSB pass: only dark gray (value 1)
+            // MSB pass: light OR dark gray (values 1 or 2)
+            if (planeMask == 0x01) {
+                active = (q == 1);
+            } else if (planeMask == 0x02) {
+                active = (q == 1 || q == 2);
+            } else {
+                active = false;
+            }
+
+            // Mask buffer: 1 marks pixel for grayscale waveform.
+            writePackedBit(planeBuffer, byteIdx, bitIdx, active);
+        }
+    }
+
+    free(row);
+    f.close();
+    return true;
 }
 
 bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
@@ -168,7 +549,9 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
                 const uint8_t g = row[(uint32_t)x * bytesPerPixel + 1];
                 const uint8_t rr = row[(uint32_t)x * bytesPerPixel + 2];
 
-                const uint32_t lum = (rr * 306U + g * 601U + b * 117U) >> 10;
+                const uint32_t lum32 = (rr * 306U + g * 601U + b * 117U) >> 10;
+                const uint8_t lum = (lum32 > 255U) ? 255U : (uint8_t)lum32;
+                const uint8_t q = quantize4(lum);
                 const uint8_t color = (lum < 128U) ? 0 : 1;
 
                 // portrait logical -> physical framebuffer mapping
@@ -178,11 +561,12 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
 
                 const int byteIdx = (fy * 100) + (fx / 8);
                 const int bitIdx = 7 - (fx % 8);
-                if (color == 0) {
-                    ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
-                } else {
-                    ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
-                }
+                writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
+                // Crosspoint grayscale mask semantics:
+                // - LSB mask: mark dark gray only
+                // - MSB mask: mark light OR dark gray
+                writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, q == 1);
+                writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q == 1) || (q == 2));
             }
         }
     } else {
@@ -222,7 +606,9 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
                 const uint8_t b = row[(uint32_t)sx * bytesPerPixel + 0];
                 const uint8_t g = row[(uint32_t)sx * bytesPerPixel + 1];
                 const uint8_t rr = row[(uint32_t)sx * bytesPerPixel + 2];
-                const uint32_t lum = (rr * 306U + g * 601U + b * 117U) >> 10;
+                const uint32_t lum32 = (rr * 306U + g * 601U + b * 117U) >> 10;
+                const uint8_t lum = (lum32 > 255U) ? 255U : (uint8_t)lum32;
+                const uint8_t q = quantize4(lum);
                 const uint8_t color = (lum < 128U) ? 0 : 1;
 
                 const int fx = py;
@@ -231,11 +617,9 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
 
                 const int byteIdx = (fy * 100) + (fx / 8);
                 const int bitIdx = 7 - (fx % 8);
-                if (color == 0) {
-                    ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
-                } else {
-                    ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
-                }
+                writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
+                writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, q == 1);
+                writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q == 1) || (q == 2));
             }
         }
     }
@@ -245,7 +629,8 @@ bool ImageDecoder::decodeBMPToDisplay(const char* path, DecodeContext* ctx) {
     return true;
 }
 
-bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight) {
+bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                  uint8_t* grayscaleLsbBuffer, uint8_t* grayscaleMsbBuffer) {
     if (!frameBuffer) {
         return false;
     }
@@ -265,6 +650,10 @@ bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint1
     }
 
     ctx->frameBuffer = frameBuffer;
+    ctx->grayscaleLsbBuffer = grayscaleLsbBuffer;
+    ctx->grayscaleMsbBuffer = grayscaleMsbBuffer;
+    ctx->planeMaskMode = false;
+    ctx->planeMask = 0;
     ctx->targetWidth = targetWidth;
     ctx->targetHeight = targetHeight;
     ctx->offsetX = 0;
@@ -548,15 +937,14 @@ bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint1
                 if (gray < 0) gray = 0;
                 else if (gray > 255) gray = 255;
 
-                uint8_t color = (gray < 128) ? 0 : 1;
+                const uint8_t q = quantize4((uint8_t)gray);
+                uint8_t color = (q < 3) ? 0 : 1;
                 
                 int byteIdx = (fy * 100) + (fx / 8);
                 int bitIdx = 7 - (fx % 8);
-                if (color == 0) {
-                    ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
-                } else {
-                    ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
-                }
+                writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
+                writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, (q & 0x01) != 0);
+                writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q & 0x02) != 0);
 
                 int16_t err = gray - (color ? 255 : 0);
                 if (px + 1 < w) curErr[px + 1] += (err * 7) / 16;
@@ -629,7 +1017,8 @@ bool ImageDecoder::decodeToDisplay(const char* path, uint8_t* frameBuffer, uint1
     return result;
 }
 
-bool ImageDecoder::decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight) {
+bool ImageDecoder::decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                          uint8_t* grayscaleLsbBuffer, uint8_t* grayscaleMsbBuffer) {
     if (!frameBuffer) {
         return false;
     }
@@ -648,6 +1037,8 @@ bool ImageDecoder::decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffe
     }
 
     ctx->frameBuffer = frameBuffer;
+    ctx->grayscaleLsbBuffer = grayscaleLsbBuffer;
+    ctx->grayscaleMsbBuffer = grayscaleMsbBuffer;
     ctx->targetWidth = targetWidth;
     ctx->targetHeight = targetHeight;
     ctx->offsetX = 0;
@@ -979,9 +1370,10 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
             uint32_t r8 = (r * 255) / 31;
             uint32_t g8 = (g * 255) / 63;
             uint32_t b8 = (b * 255) / 31;
-            uint32_t lum = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
-
-            uint8_t color = (lum < 128) ? 0 : 1;
+            uint32_t lum32 = (r8 * 306 + g8 * 601 + b8 * 117) >> 10;
+            uint8_t lum = (lum32 > 255U) ? 255U : (uint8_t)lum32;
+            uint8_t q = quantize4(lum);
+            uint8_t color = (lum >= 128U) ? 1 : 0;
 
             for (int dy = dy0; dy <= dy1; ++dy) {
                 const int py = ctx->offsetY + dy;
@@ -997,10 +1389,15 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
 
                     const int byteIdx = (fy * 100) + (fx / 8);
                     const int bitIdx = 7 - (fx % 8);
-                    if (color == 0) {
-                        ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
+                    if (ctx->planeMaskMode) {
+                        bool active = false;
+                        if (ctx->planeMask == 0x01) active = (q == 1);
+                        else if (ctx->planeMask == 0x02) active = (q == 1 || q == 2);
+                        writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, active);
                     } else {
-                        ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+                        writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
+                        writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, q == 1);
+                        writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q == 1) || (q == 2));
                     }
                 }
             }
@@ -1078,14 +1475,20 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
         if (gray < 0) gray = 0;
         else if (gray > 255) gray = 255;
 
-        uint8_t color = (gray < 128) ? 0 : 1;
+        const uint8_t q = quantize4((uint8_t)gray);
+        uint8_t color = (q < 3) ? 0 : 1;
         
         int byteIdx = (fy * 100) + (fx / 8);
         int bitIdx = 7 - (fx % 8);
-        if (color == 0) {
-            ctx->frameBuffer[byteIdx] &= ~(1 << bitIdx);
+        if (ctx->planeMaskMode) {
+            bool active = false;
+            if (ctx->planeMask == 0x01) active = (q == 1);
+            else if (ctx->planeMask == 0x02) active = (q == 1 || q == 2);
+            writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, active);
         } else {
-            ctx->frameBuffer[byteIdx] |= (1 << bitIdx);
+            writePackedBit(ctx->frameBuffer, byteIdx, bitIdx, color != 0);
+            writePackedBit(ctx->grayscaleLsbBuffer, byteIdx, bitIdx, q == 1);
+            writePackedBit(ctx->grayscaleMsbBuffer, byteIdx, bitIdx, (q == 1) || (q == 2));
         }
 
         if (useDither) {

@@ -47,6 +47,110 @@ static inline bool getFrameBufferPixelBw_tv(const uint8_t* fb, int fx, int fy) {
   return ((fb[byteIdx] >> bitIdx) & 1) != 0;
 }
 
+static inline bool getFrameBufferPixelBit_tv(const uint8_t* fb, int fx, int fy) {
+  if (!fb) {
+    return false;
+  }
+  if (fx < 0 || fx >= 800 || fy < 0 || fy >= 480) {
+    return false;
+  }
+  const int byteIdx = (fy * 100) + (fx / 8);
+  const int bitIdx = 7 - (fx % 8);
+  return ((fb[byteIdx] >> bitIdx) & 1) != 0;
+}
+
+static bool writeBmp24TopDownFromPlanes_tv(const char* path, const uint8_t* lsb, const uint8_t* msb, uint16_t w, uint16_t h) {
+  if (!path || !lsb || !msb || w == 0 || h == 0) {
+    return false;
+  }
+
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    return false;
+  }
+
+  const uint32_t rowStride = ((uint32_t)w * 3u + 3u) & ~3u;
+  const uint32_t pixelBytes = rowStride * (uint32_t)h;
+  const uint32_t fileSize = 14u + 40u + pixelBytes;
+
+  uint8_t fileHdr[14] = {'B', 'M', 0, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0};
+  fileHdr[2] = (uint8_t)(fileSize & 0xFF);
+  fileHdr[3] = (uint8_t)((fileSize >> 8) & 0xFF);
+  fileHdr[4] = (uint8_t)((fileSize >> 16) & 0xFF);
+  fileHdr[5] = (uint8_t)((fileSize >> 24) & 0xFF);
+
+  uint8_t dib[40];
+  memset(dib, 0, sizeof(dib));
+  dib[0] = 40;
+  dib[4] = (uint8_t)(w & 0xFF);
+  dib[5] = (uint8_t)((w >> 8) & 0xFF);
+  int32_t negH = -(int32_t)h;
+  dib[8] = (uint8_t)(negH & 0xFF);
+  dib[9] = (uint8_t)((negH >> 8) & 0xFF);
+  dib[10] = (uint8_t)((negH >> 16) & 0xFF);
+  dib[11] = (uint8_t)((negH >> 24) & 0xFF);
+  dib[12] = 1;
+  dib[14] = 24;
+  dib[20] = (uint8_t)(pixelBytes & 0xFF);
+  dib[21] = (uint8_t)((pixelBytes >> 8) & 0xFF);
+  dib[22] = (uint8_t)((pixelBytes >> 16) & 0xFF);
+  dib[23] = (uint8_t)((pixelBytes >> 24) & 0xFF);
+
+  if (f.write(fileHdr, sizeof(fileHdr)) != sizeof(fileHdr) || f.write(dib, sizeof(dib)) != sizeof(dib)) {
+    f.close();
+    return false;
+  }
+
+  uint8_t* row = (uint8_t*)malloc(rowStride);
+  if (!row) {
+    f.close();
+    return false;
+  }
+
+  static const uint8_t kLevels[4] = {0, 85, 170, 255};
+
+  for (uint16_t y = 0; y < h; ++y) {
+    memset(row, 0xFF, rowStride);
+    for (uint16_t x = 0; x < w; ++x) {
+      const int fx = (int)y;
+      const int fy = 479 - (int)x;
+      const int q = (getFrameBufferPixelBit_tv(msb, fx, fy) ? 2 : 0) | (getFrameBufferPixelBit_tv(lsb, fx, fy) ? 1 : 0);
+      const uint8_t v = kLevels[q & 3];
+      const uint32_t off = (uint32_t)x * 3u;
+      row[off + 0] = v;
+      row[off + 1] = v;
+      row[off + 2] = v;
+    }
+    if (f.write(row, rowStride) != rowStride) {
+      free(row);
+      f.close();
+      return false;
+    }
+  }
+
+  free(row);
+  f.close();
+  return true;
+}
+
+static bool writeRawBufferToFile_tv(const char* path, const uint8_t* buf, size_t len) {
+  if (!path || !buf || len == 0) {
+    return false;
+  }
+
+  if (SD.exists(path)) {
+    SD.remove(path);
+  }
+
+  File f = SD.open(path, FILE_WRITE);
+  if (!f) {
+    return false;
+  }
+  const size_t n = f.write(buf, len);
+  f.close();
+  return n == len;
+}
+
 static bool writeBmp24TopDownFromFb(const char* path, const uint8_t* fb, uint16_t w, uint16_t h) {
   if (!path || !fb || w == 0 || h == 0) {
     return false;
@@ -751,30 +855,90 @@ void TextViewerScreen::openFile(const String& sdPath) {
 
     // Cache cover path for sleep screen (best-effort)
     {
-      String coverPath = ep->getCoverImagePath();
+      String coverPath = ep->getCoverImagePath(false);
       Settings& s = uiManager.getSettings();
       if (coverPath.length() > 0) {
-        // Generate a fast-to-decode cached BMP cover for the sleep screen.
-        (void)sdManager.ensureDirectoryExists("/microreader/epub_covers");
-        const uint32_t key = fnv1a32_tv(sdPath.c_str());
-        String cachedPath = String("/microreader/epub_covers/") + String(key, HEX) + String(".bmp");
-
-        bool ok = false;
-        sdManager.ensureSpiBusIdle();
-        if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800)) {
-          sdManager.ensureSpiBusIdle();
-          ok = writeBmp24TopDownFromFb(cachedPath.c_str(), display.getFrameBuffer(), 480, 800);
-        }
-
-        if (ok) {
-          s.setString(String("textviewer.lastCoverPath"), cachedPath);
-        } else {
-          s.setString(String("textviewer.lastCoverPath"), coverPath);
-        }
+        s.setString(String("textviewer.lastCoverPath"), coverPath);
       } else {
         s.setString(String("textviewer.lastCoverPath"), String(""));
       }
+      s.setString(String("textviewer.lastEpubPath"), sdPath);
       (void)s.save();
+
+      // Opportunistically build a fast sleep-cover cache bundle when conditions are safe.
+      // Only do this if the extracted cover file already exists and heap is not fragmented.
+      if (coverPath.length() > 0 && display.supportsGrayscale()) {
+        const uint32_t freeHeap = ESP.getFreeHeap();
+        const size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        Serial.printf("TextViewerScreen: cover cache probe Free=%u Largest=%u Path=%s\n", (unsigned)freeHeap,
+                      (unsigned)largest, coverPath.c_str());
+
+        // If cover isn't extracted yet, only extract when heap is healthy.
+        if (!SD.exists(coverPath.c_str())) {
+          if (freeHeap > 100000 && largest > 70000) {
+            const String extracted = ep->getCoverImagePath(true);
+            if (extracted.length() > 0 && SD.exists(extracted.c_str())) {
+              coverPath = extracted;
+              s.setString(String("textviewer.lastCoverPath"), coverPath);
+              (void)s.save();
+            }
+          }
+        }
+
+        if (SD.exists(coverPath.c_str()) && freeHeap > 100000 && largest > 70000) {
+          (void)sdManager.ensureDirectoryExists("/microreader/epub_covers");
+          const uint32_t key = fnv1a32_tv(coverPath.c_str());
+          const String base = String("/microreader/epub_covers/") + String(key, HEX);
+          const String gcvPath = base + String(".gcv");
+          const String bwPath = base + String(".bw");
+          const String lsbPath = base + String(".lsb");
+          const String msbPath = base + String(".msb");
+
+          if (SD.exists(gcvPath.c_str()) && SD.exists(bwPath.c_str()) && SD.exists(lsbPath.c_str()) && SD.exists(msbPath.c_str())) {
+            s.setString(String("textviewer.lastCoverPath"), gcvPath);
+            (void)s.save();
+          } else {
+            sdManager.ensureSpiBusIdle();
+            const bool bwDecodeOk = ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(), 480, 800);
+            sdManager.ensureSpiBusIdle();
+            const bool bwOk = bwDecodeOk &&
+                              writeRawBufferToFile_tv(bwPath.c_str(), display.getFrameBuffer(), EInkDisplay::BUFFER_SIZE);
+
+            uint8_t* mask = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+            if (bwOk && mask) {
+              memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
+              const bool lsbDecodeOk = ImageDecoder::decodeToDisplayFitWidth(
+                  coverPath.c_str(), display.getFrameBuffer(), 480, 800, mask, nullptr);
+              sdManager.ensureSpiBusIdle();
+              const bool lsbOk = lsbDecodeOk && writeRawBufferToFile_tv(lsbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
+
+              memset(mask, 0x00, EInkDisplay::BUFFER_SIZE);
+              const bool msbDecodeOk = ImageDecoder::decodeToDisplayFitWidth(
+                  coverPath.c_str(), display.getFrameBuffer(), 480, 800, nullptr, mask);
+              sdManager.ensureSpiBusIdle();
+              const bool msbOk = msbDecodeOk && writeRawBufferToFile_tv(msbPath.c_str(), mask, EInkDisplay::BUFFER_SIZE);
+
+              free(mask);
+
+              if (bwOk && lsbOk && msbOk) {
+                if (SD.exists(gcvPath.c_str())) {
+                  SD.remove(gcvPath.c_str());
+                }
+                File marker = SD.open(gcvPath.c_str(), FILE_WRITE);
+                if (marker) {
+                  marker.close();
+                }
+                if (SD.exists(gcvPath.c_str())) {
+                  s.setString(String("textviewer.lastCoverPath"), gcvPath);
+                  (void)s.save();
+                }
+              }
+            } else {
+              free(mask);
+            }
+          }
+        }
+      }
     }
 
   } else {

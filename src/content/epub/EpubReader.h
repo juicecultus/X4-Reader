@@ -137,7 +137,7 @@ class EpubReader {
 
   // If the EPUB declares a cover image in content.opf, this will return the
   // extracted SD path for that cover image. Returns empty string if not found.
-  String getCoverImagePath();
+  String getCoverImagePath(bool extractIfMissing = true);
 
   /**
    * Get the underlying epub_reader handle (for debugging/testing)

@@ -15,6 +15,10 @@ class ImageDecoder {
 public:
     struct DecodeContext {
         uint8_t* frameBuffer;
+        uint8_t* grayscaleLsbBuffer;
+        uint8_t* grayscaleMsbBuffer;
+        bool planeMaskMode;
+        uint8_t planeMask;
         uint16_t targetWidth;
         uint16_t targetHeight;
         int16_t offsetX;
@@ -40,12 +44,22 @@ public:
      * @param targetHeight Target height (480 for current display).
      * @return true if decoding was successful.
      */
-    static bool decodeToDisplay(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight);
+    static bool decodeToDisplay(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                uint8_t* grayscaleLsbBuffer = nullptr, uint8_t* grayscaleMsbBuffer = nullptr);
 
-    static bool decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight);
+    static bool decodeToDisplayFitWidth(const char* path, uint8_t* frameBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                        uint8_t* grayscaleLsbBuffer = nullptr, uint8_t* grayscaleMsbBuffer = nullptr);
+
+    static bool decodeBmpPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                       uint8_t planeMask);
+
+    static bool decodePlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                    uint8_t planeMask);
 
 private:
     static bool decodeBMPToDisplay(const char* path, DecodeContext* ctx);
+    static bool decodeBMPToPlaneFitWidth(const char* path, uint8_t* planeBuffer, uint16_t targetWidth, uint16_t targetHeight,
+                                         uint8_t planeMask);
     static PNG* currentPNG;
     static int JPEGDraw(JPEGDRAW *pDraw);
     

@@ -55,7 +55,7 @@ class EpubWordProvider : public WordProvider {
   // Get the language of the EPUB for hyphenation
   Language getLanguage() const;
 
-  String getCoverImagePath() const;
+  String getCoverImagePath(bool extractIfMissing = true) const;
 
   // Style support
   CssStyle getCurrentStyle() override {

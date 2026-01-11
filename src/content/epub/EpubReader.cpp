@@ -25,7 +25,7 @@ static bool strcasecmp_helper(const String& str1, const char* str2) {
   return true;
 }
 
-String EpubReader::getCoverImagePath() {
+String EpubReader::getCoverImagePath(bool extractIfMissing) {
   if (!valid_) {
     return String("");
   }
@@ -39,6 +39,19 @@ String EpubReader::getCoverImagePath() {
     baseDir = contentOpfPath_.substring(0, lastSlash + 1);
   }
   String fullPath = baseDir + coverHref_;
+
+  // Fast path: if it's already extracted, return it.
+  if (isFileExtracted(fullPath.c_str())) {
+    return getExtractedPath(fullPath.c_str());
+  }
+
+  // If the caller doesn't want extraction, return the expected extracted path.
+  // UI can later trigger extraction on-demand (e.g. during sleep).
+  if (!extractIfMissing) {
+    return getExtractedPath(fullPath.c_str());
+  }
+
+  // Otherwise, extract it now.
   return getFile(fullPath.c_str());
 }
 
