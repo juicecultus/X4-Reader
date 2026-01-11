@@ -22,6 +22,7 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
   const int16_t x = config.marginLeft;
   int16_t y = config.marginTop;
   const int16_t maxY = config.pageHeight - config.marginBottom;
+  const int16_t lineHeight = (config.lineHeight > 0) ? config.lineHeight : 1;
 
   // Measure space width using renderer
   renderer.setFontStyle(FontStyle::REGULAR);
@@ -31,6 +32,10 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
   int startIndex = provider.getCurrentIndex();
 
   while (y < maxY) {
+    // Hard stop: don't start a new line if it would cross into reserved bottom area
+    if ((int32_t)y + (int32_t)lineHeight > (int32_t)maxY) {
+      break;
+    }
     bool isParagraphEnd = false;
     // getNextLine uses config.alignment as default, CSS overrides if present
     Line line = getNextLine(provider, renderer, maxWidth, isParagraphEnd, config.alignment);
@@ -65,9 +70,15 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
     }
 
     result.lines.push_back(line);
-    y += config.lineHeight;
+    y += lineHeight;
     if (isParagraphEnd && !line.words.empty()) {
-      y += config.paragraphSpacing;
+      const int16_t ps = (config.paragraphSpacing > 0) ? config.paragraphSpacing : 0;
+      // Only apply paragraph spacing if it still fits above reserved bottom area
+      if ((int32_t)y + (int32_t)ps <= (int32_t)maxY) {
+        y += ps;
+      } else {
+        break;
+      }
     }
   }
 
@@ -79,7 +90,16 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
 }
 
 void GreedyLayoutStrategy::renderPage(const PageLayout& layout, TextRenderer& renderer, const LayoutConfig& config) {
+  const int16_t maxY = config.pageHeight - config.marginBottom;
+  const int16_t lineHeight = (config.lineHeight > 0) ? config.lineHeight : 1;
   for (const auto& line : layout.lines) {
+    // Skip/stop any lines that would draw into the reserved footer band.
+    if (line.words.empty()) {
+      continue;
+    }
+    if ((int32_t)line.words.front().y + (int32_t)lineHeight > (int32_t)maxY) {
+      break;
+    }
     for (const auto& word : line.words) {
       renderer.setFontStyle(word.style);
       renderer.setCursor(word.x, word.y);

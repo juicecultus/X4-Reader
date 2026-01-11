@@ -26,6 +26,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
   int16_t y = config.marginTop;
   const int16_t maxY = config.pageHeight - config.marginBottom;
+  const int16_t lineHeight = (config.lineHeight > 0) ? config.lineHeight : 1;
 
   // Measure space width using renderer
   renderer.setFontStyle(FontStyle::REGULAR);
@@ -37,6 +38,10 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
 
   int startIndex = provider.getCurrentIndex();
   while (y < maxY) {
+    // Hard stop: don't start a new line if it would cross into reserved bottom area
+    if ((int32_t)y + (int32_t)lineHeight > (int32_t)maxY) {
+      break;
+    }
     int16_t yStart = y;
     int16_t lineCount = 0;
     bool isParagraphEnd = false;
@@ -44,8 +49,11 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
 
     // Collect words for the paragraph
     while (y < maxY && !isParagraphEnd) {
+      if ((int32_t)y + (int32_t)lineHeight > (int32_t)maxY) {
+        break;
+      }
       Line lineResult = getNextLine(provider, renderer, maxWidth, isParagraphEnd, config.alignment);
-      y += config.lineHeight;
+      y += lineHeight;
 
       // Capture alignment from first line of paragraph
       if (lineCount == 0 && !lineResult.words.empty()) {
@@ -64,7 +72,12 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
     }
 
     if (isParagraphEnd && lineCount > 0) {
-      y += config.paragraphSpacing;
+      const int16_t ps = (config.paragraphSpacing > 0) ? config.paragraphSpacing : 0;
+      if ((int32_t)y + (int32_t)ps <= (int32_t)maxY) {
+        y += ps;
+      } else {
+        break;
+      }
     }
 
     if (!words.empty()) {
@@ -85,6 +98,11 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
         size_t lineEnd = (breakIdx < breaks.size()) ? breaks[breakIdx] : words.size();
         if (lineStart >= lineEnd)
           break;
+
+        // Hard stop: don't emit a line that would draw into reserved bottom area.
+        if ((int32_t)currentY + (int32_t)lineHeight > (int32_t)maxY) {
+          break;
+        }
 
         std::vector<Word> lineWords;
         for (size_t i = lineStart; i < lineEnd; i++) {
@@ -183,7 +201,7 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
         lineStruct.alignment = paragraphAlignment;
         result.lines.push_back(lineStruct);
         lineStart = lineEnd;
-        currentY += config.lineHeight;
+        currentY += lineHeight;
       }
 
       words.clear();
@@ -199,7 +217,14 @@ LayoutStrategy::PageLayout KnuthPlassLayoutStrategy::layoutText(WordProvider& pr
 
 void KnuthPlassLayoutStrategy::renderPage(const PageLayout& layout, TextRenderer& renderer,
                                           const LayoutConfig& config) {
+  const int16_t maxY = config.pageHeight - config.marginBottom;
+  const int16_t lineHeight = (config.lineHeight > 0) ? config.lineHeight : 1;
   for (const auto& line : layout.lines) {
+    if (!line.words.empty()) {
+      if ((int32_t)line.words.front().y + (int32_t)lineHeight > (int32_t)maxY) {
+        break;
+      }
+    }
     for (const auto& word : line.words) {
       renderer.setFontStyle(word.style);
       renderer.setCursor(word.x, word.y);
