@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 14;
+  static constexpr int SETTINGS_COUNT = 15;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -43,6 +43,9 @@ class SettingsScreen : public Screen {
 
   // Time to sleep: 0=1 min, 1=5 min, 2=10 min, 3=15 min, 4=30 min
   int sleepTimeoutIndex = 2;
+
+  // Startup behavior: 0=Home, 1=Resume last (default)
+  int startupBehaviorIndex = 1;
 
   int clearCacheStatus = -1; // -1=idle, 0=fail, 1=ok
 

@@ -226,25 +226,37 @@ void UIManager::begin() {
   currentScreen = ScreenId::FileBrowser;
   ScreenId savedPreviousScreen = ScreenId::FileBrowser;
 
+  // Startup behavior: 0=Home, 1=Resume last (default)
+  int startupBehavior = 1;
   if (sdManager.ready() && settings) {
-    int saved = 0;
-    if (settings->getInt(String("ui.screen"), saved)) {
-      if (saved >= 0 && saved < static_cast<int>(ScreenId::Count)) {
-        currentScreen = static_cast<ScreenId>(saved);
-        Serial.printf("[%lu] UIManager: Restored screen %d from settings\n", millis(), saved);
-      } else {
-        Serial.printf("[%lu] UIManager: Invalid saved screen %d; using default\n", millis(), saved);
-      }
-    } else {
-      Serial.printf("[%lu] UIManager: No saved screen state found; using default\n", millis());
-    }
+    (void)settings->getInt(String("settings.startupBehavior"), startupBehavior);
+  }
 
-    // Restore previous screen (will apply after showScreen)
-    int prevSaved = 0;
-    if (settings->getInt(String("ui.previousScreen"), prevSaved)) {
-      if (prevSaved >= 0 && prevSaved < static_cast<int>(ScreenId::Count)) {
-        savedPreviousScreen = static_cast<ScreenId>(prevSaved);
-        Serial.printf("[%lu] UIManager: Restored previous screen %d from settings\n", millis(), prevSaved);
+  if (sdManager.ready() && settings) {
+    if (startupBehavior == 0) {
+      Serial.printf("[%lu] UIManager: Startup behavior set to Home; ignoring saved screen\n", millis());
+      currentScreen = ScreenId::FileBrowser;
+      savedPreviousScreen = ScreenId::FileBrowser;
+    } else {
+      int saved = 0;
+      if (settings->getInt(String("ui.screen"), saved)) {
+        if (saved >= 0 && saved < static_cast<int>(ScreenId::Count)) {
+          currentScreen = static_cast<ScreenId>(saved);
+          Serial.printf("[%lu] UIManager: Restored screen %d from settings\n", millis(), saved);
+        } else {
+          Serial.printf("[%lu] UIManager: Invalid saved screen %d; using default\n", millis(), saved);
+        }
+      } else {
+        Serial.printf("[%lu] UIManager: No saved screen state found; using default\n", millis());
+      }
+
+      // Restore previous screen (will apply after showScreen)
+      int prevSaved = 0;
+      if (settings->getInt(String("ui.previousScreen"), prevSaved)) {
+        if (prevSaved >= 0 && prevSaved < static_cast<int>(ScreenId::Count)) {
+          savedPreviousScreen = static_cast<ScreenId>(prevSaved);
+          Serial.printf("[%lu] UIManager: Restored previous screen %d from settings\n", millis(), prevSaved);
+        }
       }
     }
   } else {
@@ -308,6 +320,24 @@ void UIManager::showSleepScreen() {
   
   // We need to be careful with double buffering. 
   // clearScreen affects the current back buffer.
+  display.clearScreen(0xFF);
+
+  textRenderer.setFrameBuffer(display.getFrameBuffer());
+  textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
+  textRenderer.setTextColor(TextRenderer::COLOR_BLACK);
+  textRenderer.setFont(getMainFont());
+  {
+    const char* msg = "Going to sleep...";
+    int16_t x1, y1;
+    uint16_t w, h;
+    textRenderer.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
+    int16_t cx = (480 - (int)w) / 2;
+    int16_t cy = (800 - (int)h) / 2;
+    textRenderer.setCursor(cx, cy);
+    textRenderer.print(msg);
+  }
+  display.displayBuffer(EInkDisplay::FAST_REFRESH);
+
   display.clearScreen(0xFF);
 
   bool usedRandomCover = false;

@@ -176,6 +176,9 @@ void SettingsScreen::toggleCurrentSetting() {
     case 13:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
+    case 14:  // Startup
+      startupBehaviorIndex = 1 - startupBehaviorIndex;
+      break;
   }
   saveSettings();
   show();
@@ -260,6 +263,12 @@ void SettingsScreen::loadSettings() {
     sleepTimeoutIndex = sleepTimeout;
   }
 
+  // Startup behavior: 0=Home, 1=Resume last
+  int startupBehavior = 1;
+  if (s.getInt(String("settings.startupBehavior"), startupBehavior)) {
+    startupBehaviorIndex = startupBehavior ? 1 : 0;
+  }
+
   // Apply the loaded font settings
   applyFontSettings();
   applyUIFontSettings();
@@ -278,6 +287,7 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.sleepScreenMode"), sleepScreenModeIndex);
   s.setInt(String("settings.orientation"), orientationIndex);
   s.setInt(String("settings.sleepTimeout"), sleepTimeoutIndex);
+  s.setInt(String("settings.startupBehavior"), startupBehaviorIndex);
 
   if (!s.save()) {
     Serial.println("SettingsScreen: Failed to write settings.cfg");
@@ -314,6 +324,8 @@ String SettingsScreen::getSettingName(int index) {
       return "WiFi";
     case 13:
       return "Clear Cache";
+    case 14:
+      return "Startup";
     default:
       return "";
   }
@@ -400,6 +412,8 @@ String SettingsScreen::getSettingValue(int index) {
       if (clearCacheStatus < 0)
         return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
+    case 14:
+      return startupBehaviorIndex ? "Resume" : "Home";
     default:
       return "";
   }
