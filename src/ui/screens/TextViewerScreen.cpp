@@ -724,29 +724,11 @@ void TextViewerScreen::openFile(const String& sdPath) {
 
     // Cache cover path for sleep screen (best-effort)
     {
-      String coverPath = ep->getCoverImagePath();
       Settings& s = uiManager.getSettings();
-      if (coverPath.length() > 0) {
-        // Generate a fast-to-decode cached BMP cover for the sleep screen.
-        (void)sdManager.ensureDirectoryExists("/microreader/epub_covers");
-        const uint32_t key = fnv1a32_tv(sdPath.c_str());
-        String cachedPath = String("/microreader/epub_covers/") + String(key, HEX) + String(".bmp");
-
-        bool ok = false;
-        sdManager.ensureSpiBusIdle();
-        if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getBBEPAPER(), display.getFrameBuffer(), 480, 800)) {
-          sdManager.ensureSpiBusIdle();
-          ok = writeBmp24TopDownFromFb(cachedPath.c_str(), display.getFrameBuffer(), 480, 800);
-        }
-
-        if (ok) {
-          s.setString(String("textviewer.lastCoverPath"), cachedPath);
-        } else {
-          s.setString(String("textviewer.lastCoverPath"), coverPath);
-        }
-      } else {
-        s.setString(String("textviewer.lastCoverPath"), String(""));
-      }
+      // Do not extract/convert covers during EPUB open; it is expensive and can fragment heap.
+      // Sleep screen can extract the cover on-demand when needed.
+      s.setString(String("textviewer.lastCoverPath"), String(""));
+      s.setString(String("textviewer.lastEpubPath"), sdPath);
       (void)s.save();
     }
 
@@ -766,6 +748,7 @@ void TextViewerScreen::openFile(const String& sdPath) {
     {
       Settings& s = uiManager.getSettings();
       s.setString(String("textviewer.lastCoverPath"), String(""));
+      s.setString(String("textviewer.lastEpubPath"), String(""));
       (void)s.save();
     }
   }

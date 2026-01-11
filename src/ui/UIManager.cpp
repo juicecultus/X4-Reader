@@ -26,6 +26,8 @@
 #include "ui/screens/XtcViewerScreen.h"
 #include "ui/screens/ClockSettingsScreen.h"
 #include "ui/screens/TimezoneSelectScreen.h"
+
+#include "content/epub/EpubReader.h"
 #include "ui/screens/WifiPasswordEntryScreen.h"
 #include "ui/screens/WifiSettingsScreen.h"
 #include "ui/screens/WifiSsidSelectScreen.h"
@@ -348,6 +350,23 @@ void UIManager::showSleepScreen() {
 
   if (sleepMode == 0 && settings) {
     String coverPath = settings->getString(String("textviewer.lastCoverPath"), String(""));
+    if (coverPath.length() == 0) {
+      // Defer EPUB cover extraction until sleep to keep EPUB open fast and avoid
+      // fragmenting heap during normal reading.
+      const String epubPath = settings->getString(String("textviewer.lastEpubPath"), String(""));
+      if (epubPath.length() > 0 && SD.exists(epubPath.c_str())) {
+        sdManager.ensureSpiBusIdle();
+        EpubReader er(epubPath.c_str());
+        if (er.isValid()) {
+          String extracted = er.getCoverImagePath();
+          if (extracted.length() > 0 && SD.exists(extracted.c_str())) {
+            coverPath = extracted;
+            settings->setString(String("textviewer.lastCoverPath"), coverPath);
+            (void)settings->save();
+          }
+        }
+      }
+    }
     if (coverPath.length() > 0) {
       // SD and the e-ink controller share SPI; ensure CS lines are in a safe state
       // before we touch SD during shutdown.
