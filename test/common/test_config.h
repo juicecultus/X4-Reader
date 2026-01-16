@@ -16,8 +16,9 @@ constexpr int DISPLAY_HEIGHT = 800;
 // Default layout configuration values
 constexpr int DEFAULT_MARGIN_LEFT = 10;
 constexpr int DEFAULT_MARGIN_RIGHT = 10;
-constexpr int DEFAULT_MARGIN_TOP = 40;
-constexpr int DEFAULT_MARGIN_BOTTOM = 20;
+constexpr int DEFAULT_MARGIN_TOP = 4;
+constexpr int DEFAULT_MARGIN_BOTTOM = 24;
+constexpr int DEFAULT_LINE_SPACING = 4;
 constexpr int DEFAULT_LINE_HEIGHT = 30;
 constexpr int DEFAULT_MIN_SPACE_WIDTH = 8;
 

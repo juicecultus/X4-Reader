@@ -240,7 +240,7 @@ String SettingsScreen::getSettingName(int index) {
     case 0:
       return "Margins";
     case 1:
-      return "Line Height";
+      return "Line Spacing";
     case 2:
       return "Alignment";
     case 3:

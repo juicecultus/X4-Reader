@@ -62,6 +62,7 @@ void runTestConfiguration(const PageTestConfig& testConfig, TestUtils::TestRunne
   layoutConfig.marginRight = ::TestConfig::DEFAULT_MARGIN_RIGHT;
   layoutConfig.marginTop = ::TestConfig::DEFAULT_MARGIN_TOP;
   layoutConfig.marginBottom = ::TestConfig::DEFAULT_MARGIN_BOTTOM;
+  layoutConfig.lineSpacing = ::TestConfig::DEFAULT_LINE_SPACING;
   layoutConfig.lineHeight = ::TestConfig::DEFAULT_LINE_HEIGHT;
   layoutConfig.minSpaceWidth = ::TestConfig::DEFAULT_MIN_SPACE_WIDTH;
   layoutConfig.pageWidth = ::TestConfig::DISPLAY_WIDTH;

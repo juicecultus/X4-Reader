@@ -20,7 +20,16 @@ LayoutStrategy::PageLayout GreedyLayoutStrategy::layoutText(WordProvider& provid
                                                             const LayoutConfig& config) {
   const int16_t maxWidth = config.pageWidth - config.marginLeft - config.marginRight;
   const int16_t x = config.marginLeft;
-  int16_t y = config.marginTop;
+
+  // Calculate vertical centering offset based on maximum line capacity
+  const int16_t availableHeight = config.pageHeight - config.marginTop - config.marginBottom;
+  const int16_t maxLines = availableHeight / config.lineHeight;
+  const int16_t totalContentHeight = maxLines * config.lineHeight - config.lineSpacing;
+  const int16_t verticalPadding = (availableHeight - totalContentHeight) / 2;
+
+  // Font height = lineHeight - lineSpacing
+  // Y coordinate is the baseline, so add font height to ensure top of first line is visible
+  int16_t y = config.marginTop + verticalPadding + (config.lineHeight - config.lineSpacing);
   const int16_t maxY = config.pageHeight - config.marginBottom;
 
   // Measure space width using renderer

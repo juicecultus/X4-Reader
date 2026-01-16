@@ -53,6 +53,7 @@ class LayoutStrategy {
     int16_t marginTop;
     int16_t marginBottom;
     int16_t lineHeight;
+    int16_t lineSpacing;
     int16_t minSpaceWidth;
     int16_t pageWidth;
     int16_t pageHeight;

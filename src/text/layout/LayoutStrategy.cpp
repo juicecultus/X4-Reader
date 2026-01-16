@@ -217,7 +217,7 @@ int LayoutStrategy::getPreviousPageStart(WordProvider& provider, TextRenderer& r
 
   // Calculate how many lines fit on the screen
   const int16_t availableHeight = config.pageHeight - config.marginTop - config.marginBottom;
-  const int maxLines = ceil(availableHeight / (double)config.lineHeight);
+  const int maxLines = availableHeight / config.lineHeight;
 
   // Go backwards more than one page to the end of the paragraph and then move forward to find the start
   provider.setPosition(currentStartPosition);

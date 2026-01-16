@@ -68,6 +68,7 @@ void runBidirectionalParagraphTest(TestUtils::TestRunner& runner, EInkDisplay& d
   cfg.marginRight = 0;
   cfg.marginTop = 0;
   cfg.marginBottom = 0;
+  cfg.lineSpacing = 2;
   cfg.lineHeight = 10;
   cfg.minSpaceWidth = 1;
   cfg.pageWidth = TestConfig::DISPLAY_WIDTH;
