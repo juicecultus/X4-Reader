@@ -1,8 +1,16 @@
 #include "EInkDisplay.h"
 
+#ifdef USE_M5UNIFIED
+#include <algorithm>
+#endif
+
 #include <cstring>
 #include <fstream>
 #include <vector>
+
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
+#include <bb_epaper.h>
+#endif
 
 // SSD1677 command definitions
 // Initialization and reset
@@ -125,6 +133,12 @@ EInkDisplay::EInkDisplay(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t 
 }
 
 EInkDisplay::~EInkDisplay() {
+#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
+  if (bbep) {
+    delete bbep;
+    bbep = nullptr;
+  }
+#endif
 }
 
 void EInkDisplay::begin() {
@@ -140,11 +154,24 @@ void EInkDisplay::begin() {
   Serial.printf("[%lu]   Static frame buffers (2 x %lu bytes = 96KB)\n", millis(), BUFFER_SIZE);
   Serial.printf("[%lu]   Initializing e-ink display driver...\n", millis());
 
-#ifdef ARDUINO
+#ifdef USE_M5UNIFIED
+  // Paper S3: display is owned/initialized by M5Unified.
+  M5.Display.setRotation(0);
+  M5.Display.fillScreen(0xFFFF);
+  M5.Display.display();
+  isScreenOn = true;
+
+#elif defined(ARDUINO)
   // Initialize SPI with custom pins
   SPI.begin(_sclk, -1, _mosi, _cs);
   spiSettings = SPISettings(40000000, MSBFIRST, SPI_MODE0);  // MODE0 is standard for SSD1677
   Serial.printf("[%lu]   SPI initialized at 40 MHz, Mode 0\n", millis());
+
+  // bb_epaper handles SPI init internally once we provide GPIO/pin mapping.
+  if (bbep) {
+    delete bbep;
+    bbep = nullptr;
+  }
 
   // Setup GPIO pins
   pinMode(_cs, OUTPUT);
@@ -405,7 +432,35 @@ void EInkDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* 
 }
 
 void EInkDisplay::displayBuffer(RefreshMode mode) {
-#ifdef ARDUINO
+#ifdef USE_M5UNIFIED
+  // Convert 1bpp (MSB-first) framebuffer into RGB565 lines and push.
+  // This is not optimized yet, but it is low-memory and correct.
+  const uint16_t w = DISPLAY_WIDTH;
+  const uint16_t h = DISPLAY_HEIGHT;
+
+  // Use a modest line buffer to limit stack usage.
+  static std::vector<uint16_t> line;
+  if (line.size() != w) {
+    line.assign(w, 0xFFFF);
+  }
+
+  const uint8_t* fb = frameBuffer;
+  const uint32_t rowBytes = DISPLAY_WIDTH_BYTES;
+  for (uint16_t y = 0; y < h; y++) {
+    const uint8_t* row = fb + (uint32_t)y * rowBytes;
+    for (uint16_t x = 0; x < w; x++) {
+      const uint8_t b = row[x / 8];
+      const uint8_t bit = 7 - (x % 8);
+      const bool isWhite = ((b >> bit) & 0x01) != 0;
+      line[x] = isWhite ? 0xFFFF : 0x0000;
+    }
+    M5.Display.pushImage(0, y, w, 1, line.data());
+  }
+  M5.Display.display();
+  (void)mode;
+  swapBuffers();
+
+#elif defined(ARDUINO)
   if (!isScreenOn) {
     // Force half refresh if screen is off
     mode = HALF_REFRESH;
@@ -455,7 +510,13 @@ void EInkDisplay::displayGrayBuffer(bool turnOffScreen) {
 }
 
 void EInkDisplay::refreshDisplay(RefreshMode mode, bool turnOffScreen) {
-#ifdef ARDUINO
+#ifdef USE_M5UNIFIED
+  // Paper S3: displayBuffer() already pushes a full frame.
+  // We keep this as a no-op for now.
+  (void)mode;
+  (void)turnOffScreen;
+
+#elif defined(ARDUINO)
   // Configure Display Update Control 1
   sendCommand(CMD_DISPLAY_UPDATE_CTRL1);
   sendData((mode == FAST_REFRESH) ? CTRL1_NORMAL : CTRL1_BYPASS_RED);  // Configure buffer comparison mode
@@ -541,7 +602,11 @@ void EInkDisplay::setCustomLUT(bool enabled, const unsigned char* lutData) {
 }
 
 void EInkDisplay::deepSleep() {
-#ifdef ARDUINO
+#ifdef USE_M5UNIFIED
+  // M5Unified owns display power management. No-op for now.
+  isScreenOn = false;
+
+#elif defined(ARDUINO)
   Serial.printf("[%lu]   Preparing display for deep sleep...\n", millis());
 
   // First, power down the display properly
@@ -557,7 +622,6 @@ void EInkDisplay::deepSleep() {
 
     // Wait for the power-down sequence to complete
     waitWhileBusy(" display power-down");
-
     isScreenOn = false;
   }
 

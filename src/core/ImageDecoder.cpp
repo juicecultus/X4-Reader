@@ -1406,7 +1406,8 @@ int ImageDecoder::JPEGDraw(JPEGDRAW *pDraw) {
     return 1;
 }
 
-void ImageDecoder::PNGDraw(PNGDRAW *pDraw) {
+void ImageDecoder::PNGDraw(PNGDRAW *pDraw)
+{
     if (!pDraw || !g_ctx) return;
     DecodeContext *ctx = g_ctx; 
     

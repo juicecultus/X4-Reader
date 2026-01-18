@@ -5,6 +5,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#ifdef USE_M5UNIFIED
+#include <M5Unified.h>
+#endif
+
 #include "core/BatteryMonitor.h"
 #include "core/Buttons.h"
 #include "core/EInkDisplay.h"
@@ -16,6 +20,15 @@
 #include "resources/fonts/other/MenuHeader.h"
 #include "ui/UIManager.h"
 
+Buttons buttons;
+
+#ifdef USE_M5UNIFIED
+EInkDisplay einkDisplay(-1, -1, -1, -1, -1, -1);
+SDCardManager sdManager(0, 0, 0, 0, 0);
+// Battery ADC pin and global instance (ignored on Paper S3; uses M5.Power)
+BatteryMonitor g_battery(0);
+
+#else
 // USB detection pin
 #define UART0_RXD 20  // Used for USB connection detection
 
@@ -36,12 +49,13 @@ const int POWER_BUTTON_PIN = 3;
 
 #define EINK_SPI_CS 21  // EINK Chip Select
 
-Buttons buttons;
 EInkDisplay einkDisplay(EPD_SCLK, EPD_MOSI, EINK_SPI_CS, EPD_DC, EPD_RST, EPD_BUSY);
 SDCardManager sdManager(EPD_SCLK, SD_SPI_MISO, EPD_MOSI, SD_SPI_CS, EINK_SPI_CS);
+
 // Battery ADC pin and global instance
 #define BAT_GPIO0 0
 BatteryMonitor g_battery(BAT_GPIO0);
+#endif
 UIManager* uiManager = nullptr;
 
 static unsigned long getSleepTimeoutMs() {
@@ -77,6 +91,9 @@ void buttonUpdateTask(void* parameter) {
 
 // Write debug log to SD card
 void writeDebugLog() {
+#ifdef USE_M5UNIFIED
+  return;
+#else
   esp_sleep_wakeup_cause_t w = esp_sleep_get_wakeup_cause();
   String dbg = String("wakeup: ") + String((int)w) + "\n";
   dbg += String("power_raw: ") + String(digitalRead(POWER_BUTTON_PIN)) + "\n";
@@ -88,16 +105,24 @@ void writeDebugLog() {
   } else {
     Serial.println("SD not ready; skipping debug log write");
   }
+#endif
 }
 
 // Check if USB is connected
 bool isUsbConnected() {
+#ifdef USE_M5UNIFIED
+  return true;
+#else
   // U0RXD/GPIO20 reads HIGH when USB is connected
   return digitalRead(UART0_RXD) == HIGH;
+#endif
 }
 
 // Verify long press on wake-up
 void verifyWakeupLongPress() {
+#ifdef USE_M5UNIFIED
+  return;
+#else
   unsigned long timerStart = millis();
   long pressDuration = 0;
   bool bootDevice = false;
@@ -127,6 +152,7 @@ void verifyWakeupLongPress() {
     esp_deep_sleep_enable_gpio_wakeup(1ULL << POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
     esp_deep_sleep_start();
   }
+#endif
 }
 
 // Enter deep sleep mode
@@ -141,6 +167,10 @@ void enterDeepSleep() {
   if (uiManager)
     uiManager->showSleepScreen();
 
+#ifdef USE_M5UNIFIED
+  return;
+#else
+
   // Enter deep sleep mode
   // this seems to start the display and leads to grayish screen somehow???
   // einkDisplay.deepSleep();
@@ -151,9 +181,15 @@ void enterDeepSleep() {
   pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
   esp_deep_sleep_enable_gpio_wakeup(1ULL << POWER_BUTTON_PIN, ESP_GPIO_WAKEUP_GPIO_LOW);
   esp_deep_sleep_start();
+#endif
 }
 
 void setup() {
+#ifdef USE_M5UNIFIED
+  auto cfg = M5.config();
+  M5.begin(cfg);
+  Serial.begin(115200);
+#else
   // Only start/wait for serial monitor if USB is connected
   pinMode(UART0_RXD, INPUT);
   if (isUsbConnected()) {
@@ -166,6 +202,7 @@ void setup() {
   } else {
     verifyWakeupLongPress();
   }
+#endif
 
   Serial.println("\n=================================");
   Serial.println("  MicroReader - ESP32-C3 E-Ink");

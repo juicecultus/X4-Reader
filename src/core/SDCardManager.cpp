@@ -7,6 +7,18 @@ SDCardManager::SDCardManager(uint8_t epd_sclk, uint8_t sd_miso, uint8_t epd_mosi
     : epd_sclk(epd_sclk), sd_miso(sd_miso), epd_mosi(epd_mosi), sd_cs(sd_cs), eink_cs(eink_cs), initialized(false) {}
 
 bool SDCardManager::begin() {
+#ifdef USE_M5UNIFIED
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  if (!SD.begin(SD_CS, SPI, 40000000)) {
+    Serial.print("\n SD card not detected\n");
+    initialized = false;
+  } else {
+    Serial.print("\n SD card detected\n");
+    initialized = true;
+  }
+  return initialized;
+
+#else
   pinMode(eink_cs, OUTPUT);
   digitalWrite(eink_cs, HIGH);
 
@@ -23,6 +35,7 @@ bool SDCardManager::begin() {
   }
 
   return initialized;
+#endif
 }
 
 bool SDCardManager::ready() const {
@@ -30,6 +43,10 @@ bool SDCardManager::ready() const {
 }
 
 void SDCardManager::ensureSpiBusIdle() {
+#ifdef USE_M5UNIFIED
+  // Paper S3: SD does not share the SPI bus with a discrete e-ink controller.
+  return;
+#else
   // SD and the e-ink controller share the same SPI bus. If the e-ink CS is
   // left asserted, SD transactions can fail in the SD stack (sometimes
   // fatally). Force both devices deselected before any SD access.
@@ -37,6 +54,7 @@ void SDCardManager::ensureSpiBusIdle() {
   digitalWrite(eink_cs, HIGH);
   pinMode(sd_cs, OUTPUT);
   digitalWrite(sd_cs, HIGH);
+#endif
 }
 
 bool SDCardManager::isDirectory(const char* path) {

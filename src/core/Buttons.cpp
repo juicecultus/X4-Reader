@@ -13,10 +13,15 @@ Buttons::Buttons() : currentState(0), previousState(0) {
 }
 
 void Buttons::begin() {
+#ifdef USE_M5UNIFIED
+  // M5Unified handles button pin setup.
+  return;
+#else
   pinMode(BUTTON_ADC_PIN_1, INPUT);
   pinMode(BUTTON_ADC_PIN_2, INPUT);
   pinMode(POWER_BUTTON_PIN, INPUT_PULLUP);
   analogSetAttenuation(ADC_11db);
+#endif
 }
 
 int Buttons::getButtonFromADC(int adcValue, const int thresholds[], int numButtons) {
@@ -35,6 +40,21 @@ int Buttons::getButtonFromADC(int adcValue, const int thresholds[], int numButto
 
 uint8_t Buttons::getState() {
   uint8_t state = 0;
+
+#ifdef USE_M5UNIFIED
+  // Paper S3: map M5 buttons to Macroreader buttons.
+  // Note: this is a first-pass mapping; we can later incorporate touch gestures.
+  if (M5.BtnA.isPressed()) {
+    state |= (1 << BACK);
+  }
+  if (M5.BtnB.isPressed()) {
+    state |= (1 << CONFIRM);
+  }
+  if (M5.BtnC.isPressed()) {
+    state |= (1 << RIGHT);
+  }
+  return state;
+#else
 
   // Read GPIO1 buttons
   int adcValue1 = analogRead(BUTTON_ADC_PIN_1);
@@ -56,6 +76,7 @@ uint8_t Buttons::getState() {
   }
 
   return state;
+#endif
 }
 
 void Buttons::update() {
