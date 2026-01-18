@@ -175,9 +175,10 @@ void enterDeepSleep() {
   Serial.println("Entering deep sleep with touch wakeup on GPIO 48...");
   Serial.flush();
   
-  // Configure GPIO 48 (touch INT) as wakeup source using EXT1
-  // EXT1 supports multiple GPIOs and works with ESP32-S3
-  esp_sleep_enable_ext1_wakeup(1ULL << 48, ESP_EXT1_WAKEUP_ANY_LOW);
+  // Configure GPIO 48 (touch INT) as wakeup source
+  // Use gpio_wakeup which works with any GPIO on ESP32-S3
+  gpio_wakeup_enable((gpio_num_t)48, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
   esp_deep_sleep_start();
 #else
   // Enter deep sleep mode
