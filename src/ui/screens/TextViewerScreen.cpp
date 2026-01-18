@@ -262,9 +262,9 @@ static int16_t getFontMaxBottom_tv(const SimpleGFXfont* font) {
   return maxBottom;
 }
 
-static constexpr int16_t kFooterPaddingBottom_tv = 6;
-static constexpr int16_t kFooterGapAbove_tv = 10;
-static constexpr int16_t kFooterHeight_tv = 10;  // Approximate height of footer text
+static constexpr int16_t kFooterPaddingBottom_tv = 10;
+static constexpr int16_t kFooterGapAbove_tv = 16;
+static constexpr int16_t kFooterHeight_tv = 20;  // Approximate height of footer text
 
 TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer, SDCardManager& sdManager,
                                    UIManager& uiManager)

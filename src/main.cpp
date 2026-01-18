@@ -188,11 +188,11 @@ void enterDeepSleep() {
 void setup() {
 #ifdef USE_M5UNIFIED
   Serial.begin(115200);
-  // Paper S3: keep power enabled when not using M5.begin().
-  rtc_gpio_init(GPIO_NUM_44);
-  rtc_gpio_set_direction(GPIO_NUM_44, RTC_GPIO_MODE_OUTPUT_ONLY);
-  rtc_gpio_set_level(GPIO_NUM_44, 1);
-  rtc_gpio_hold_en(GPIO_NUM_44);
+  // Paper S3: Do NOT call M5.begin() - it initializes the display and takes the i80 bus,
+  // which conflicts with FastEPD. Battery monitoring uses direct I2C to AXP2101 instead.
+  // Keep power enabled via GPIO 2 (not 44 - that's for other boards)
+  pinMode(2, OUTPUT);
+  digitalWrite(2, HIGH);
 #else
   // Only start/wait for serial monitor if USB is connected
   pinMode(UART0_RXD, INPUT);

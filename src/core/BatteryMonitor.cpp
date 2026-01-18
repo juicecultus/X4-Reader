@@ -2,8 +2,8 @@
 #include "BatteryMonitor.h"
 
 #ifdef USE_M5UNIFIED
-// Intentionally avoid M5Unified runtime APIs here.
-// M5.begin() initializes the built-in display and conflicts with FastEPD's i80 bus usage.
+// Paper S3: Battery voltage is read via ADC on GPIO 3
+#define PAPER_S3_BAT_ADC_PIN 3
 #else
 #include "esp_adc_cal.h"
 #endif
@@ -13,16 +13,15 @@ BatteryMonitor::BatteryMonitor(uint8_t adcPin, uint16_t dividerMultiplier100)
 }
 
 uint16_t BatteryMonitor::readPercentage() const {
-#ifdef USE_M5UNIFIED
-  return 0;
-#else
   return percentageFromMillivolts(readMillivolts());
-#endif
 }
 
 uint16_t BatteryMonitor::readMillivolts() const {
 #ifdef USE_M5UNIFIED
-  return 0;
+  // Paper S3: Battery voltage via ADC on GPIO 3 with voltage divider (2x)
+  // Use analogReadMilliVolts() which handles calibration internally without legacy driver
+  const uint32_t mv = analogReadMilliVolts(PAPER_S3_BAT_ADC_PIN);
+  return static_cast<uint16_t>(mv * 2);  // 2x voltage divider
 #else
   const uint16_t raw = readRawMillivolts();
   const uint32_t mv = millivoltsFromRawAdc(raw);
@@ -32,10 +31,9 @@ uint16_t BatteryMonitor::readMillivolts() const {
 
 uint16_t BatteryMonitor::readRawMillivolts() const {
 #ifdef USE_M5UNIFIED
-  return 0;
+  return analogRead(PAPER_S3_BAT_ADC_PIN);
 #else
-  const uint16_t raw = analogRead(_adcPin);
-  return raw;
+  return analogRead(_adcPin);
 #endif
 }
 
@@ -53,6 +51,7 @@ uint16_t BatteryMonitor::percentageFromMillivolts(uint16_t millivolts) {
 uint16_t BatteryMonitor::millivoltsFromRawAdc(uint16_t adc_raw)
 {
 #ifdef USE_M5UNIFIED
+  // Paper S3: Not used - we use analogReadMilliVolts() directly
   (void)adc_raw;
   return 0;
 #else

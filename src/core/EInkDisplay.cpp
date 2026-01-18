@@ -189,6 +189,10 @@ void EInkDisplay::begin() {
     Serial.printf("[%lu] FastEPD initPanel returned %d\n", millis(), rc);
     g_epd.setMode(BB_MODE_1BPP);
 
+    // Increase partial update passes for cleaner text rendering (reduces ghosting)
+    // Default is typically 2-3 passes; more passes = cleaner but slower
+    g_epd.setPasses(8, 8);  // 8 partial passes, 8 full passes
+
     // Keep FastEPD at its native rotation.
     // FastEPD's internal 1bpp packing differs across rotations; directly memcpy'ing
     // into a rotated buffer can produce corrupted vertical artifacts.
