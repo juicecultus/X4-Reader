@@ -112,14 +112,7 @@ void writeDebugLog() {
 // Check if USB is connected
 bool isUsbConnected() {
 #ifdef USE_M5UNIFIED
-  // Paper S3: GPIO 5 is USB_DET - reads HIGH when USB is connected
-  // Per M5Stack docs: "When the voltage at the USB_DET pin exceeds 0.2V, USB is connected"
-  static bool pinConfigured = false;
-  if (!pinConfigured) {
-    pinMode(5, INPUT);
-    pinConfigured = true;
-  }
-  return digitalRead(5) == HIGH;
+  return true;
 #else
   // U0RXD/GPIO20 reads HIGH when USB is connected
   return digitalRead(UART0_RXD) == HIGH;
@@ -297,12 +290,19 @@ void loop() {
   if (uiManager)
     uiManager->handleButtons();
 
-  // Auto-sleep after inactivity (skip when USB is connected)
+  // Auto-sleep after inactivity
+  // Paper S3: always allow sleep (USB check not reliable and we want sleep even when charging)
+  // Other boards: skip when USB is connected to avoid sleeping during debug
   static unsigned long lastActivityTime = millis();
   if (buttons.wasAnyPressed() || buttons.wasAnyReleased()) {
     lastActivityTime = millis();
   }
-  if (!isUsbConnected()) {
+#ifdef USE_M5UNIFIED
+  const bool allowSleep = true;
+#else
+  const bool allowSleep = !isUsbConnected();
+#endif
+  if (allowSleep) {
     const unsigned long sleepTimeoutMs = getSleepTimeoutMs();
     if (millis() - lastActivityTime >= sleepTimeoutMs) {
       Serial.printf("[%lu] Auto-sleep triggered after %lu ms of inactivity\n", millis(), sleepTimeoutMs);
