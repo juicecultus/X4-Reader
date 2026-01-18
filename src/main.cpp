@@ -112,7 +112,14 @@ void writeDebugLog() {
 // Check if USB is connected
 bool isUsbConnected() {
 #ifdef USE_M5UNIFIED
-  return true;
+  // Paper S3: GPIO 5 is USB_DET - reads HIGH when USB is connected
+  // Per M5Stack docs: "When the voltage at the USB_DET pin exceeds 0.2V, USB is connected"
+  static bool pinConfigured = false;
+  if (!pinConfigured) {
+    pinMode(5, INPUT);
+    pinConfigured = true;
+  }
+  return digitalRead(5) == HIGH;
 #else
   // U0RXD/GPIO20 reads HIGH when USB is connected
   return digitalRead(UART0_RXD) == HIGH;
