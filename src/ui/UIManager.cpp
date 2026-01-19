@@ -1230,7 +1230,8 @@ void UIManager::showScreen(ScreenId id) {
   if (id == ScreenId::Settings && currentScreen != ScreenId::Settings) {
     if (currentScreen != ScreenId::WifiSettings && currentScreen != ScreenId::WifiSsidSelect &&
         currentScreen != ScreenId::WifiPasswordEntry && currentScreen != ScreenId::ClockSettings &&
-        currentScreen != ScreenId::TimezoneSelect && currentScreen != ScreenId::Chapters) {
+        currentScreen != ScreenId::TimezoneSelect && currentScreen != ScreenId::Chapters &&
+        currentScreen != ScreenId::FontSelect) {
       settingsReturnScreen = currentScreen;
     }
   }
