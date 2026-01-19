@@ -64,8 +64,7 @@ static unsigned long getSleepTimeoutMs() {
   int idx = 2;
   if (uiManager) {
     Settings& s = uiManager->getSettings();
-    bool found = s.getInt(String("settings.sleepTimeout"), idx);
-    Serial.printf("[%lu] getSleepTimeoutMs: found=%d idx=%d\n", millis(), found, idx);
+    (void)s.getInt(String("settings.sleepTimeout"), idx);
   }
   switch (idx) {
     case 0:
