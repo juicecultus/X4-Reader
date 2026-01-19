@@ -5,7 +5,7 @@
 #ifdef USE_M5UNIFIED
 #include <bb_truetype.h>
 
-// Static instance pointer for callback
+// Static instance pointer
 TrueTypeRenderer* TrueTypeRenderer::activeInstance = nullptr;
 
 // bb_truetype instance (static to avoid repeated construction)
@@ -19,85 +19,8 @@ TrueTypeRenderer::~TrueTypeRenderer() {
   closeFont();
 }
 
+// Not used - keeping for compatibility
 void TrueTypeRenderer::drawLineCallback(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint32_t color) {
-  if (!activeInstance) return;
-  
-  uint8_t* fb = activeInstance->display.getFrameBuffer();
-  if (!fb) return;
-  
-  const int fbWidth = EInkDisplay::DISPLAY_WIDTH;
-  const int fbHeight = EInkDisplay::DISPLAY_HEIGHT;
-  const int fbWidthBytes = EInkDisplay::DISPLAY_WIDTH_BYTES;
-  
-  // Determine if we're drawing black (0) or white (1)
-  // bb_truetype passes color as set by setTextColor - we use 0 for black
-  const bool drawBlack = (color == 0);
-  
-  // Horizontal line (most common for fill) - optimized path
-  if (y0 == y1) {
-    if (y0 < 0 || y0 >= fbHeight) return;
-    if (x0 > x1) { int16_t t = x0; x0 = x1; x1 = t; }
-    if (x1 < 0 || x0 >= fbWidth) return;
-    if (x0 < 0) x0 = 0;
-    if (x1 >= fbWidth) x1 = fbWidth - 1;
-    
-    for (int16_t x = x0; x <= x1; x++) {
-      int idx = y0 * fbWidthBytes + (x / 8);
-      uint8_t mask = 0x80 >> (x & 7);
-      if (drawBlack) {
-        fb[idx] &= ~mask;  // Clear bit = black
-      } else {
-        fb[idx] |= mask;   // Set bit = white
-      }
-    }
-    return;
-  }
-  
-  // Vertical line - also common
-  if (x0 == x1) {
-    if (x0 < 0 || x0 >= fbWidth) return;
-    if (y0 > y1) { int16_t t = y0; y0 = y1; y1 = t; }
-    if (y1 < 0 || y0 >= fbHeight) return;
-    if (y0 < 0) y0 = 0;
-    if (y1 >= fbHeight) y1 = fbHeight - 1;
-    
-    uint8_t mask = 0x80 >> (x0 & 7);
-    int xByte = x0 / 8;
-    for (int16_t y = y0; y <= y1; y++) {
-      int idx = y * fbWidthBytes + xByte;
-      if (drawBlack) {
-        fb[idx] &= ~mask;
-      } else {
-        fb[idx] |= mask;
-      }
-    }
-    return;
-  }
-  
-  // Arbitrary line - Bresenham's algorithm
-  int16_t dx = abs(x1 - x0);
-  int16_t dy = -abs(y1 - y0);
-  int16_t sx = (x0 < x1) ? 1 : -1;
-  int16_t sy = (y0 < y1) ? 1 : -1;
-  int16_t err = dx + dy;
-  
-  while (true) {
-    // Draw pixel at (x0, y0)
-    if (x0 >= 0 && x0 < fbWidth && y0 >= 0 && y0 < fbHeight) {
-      int idx = y0 * fbWidthBytes + (x0 / 8);
-      uint8_t mask = 0x80 >> (x0 & 7);
-      if (drawBlack) {
-        fb[idx] &= ~mask;
-      } else {
-        fb[idx] |= mask;
-      }
-    }
-    
-    if (x0 == x1 && y0 == y1) break;
-    int16_t e2 = 2 * err;
-    if (e2 >= dy) { err += dy; x0 += sx; }
-    if (e2 <= dx) { err += dx; y0 += sy; }
-  }
 }
 
 bool TrueTypeRenderer::loadFont(const char* path) {
@@ -123,15 +46,21 @@ bool TrueTypeRenderer::loadFont(const char* path) {
     return false;
   }
   
-  // Set up our draw callback
   activeInstance = this;
-  g_ttf.setTtfDrawLine(drawLineCallback);
+  
+  // Use bb_truetype's native 1-bit framebuffer mode
+  // Paper S3 display is 540x960 in portrait mode
+  g_ttf.setFramebuffer(EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, 1, display.getFrameBuffer());
+  
+  // Set text boundary to full display
+  g_ttf.setTextBoundary(0, EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT);
   
   // Set default character size
   g_ttf.setCharacterSize(charSize);
   
-  // Set text color (0 = black for our callback)
-  g_ttf.setTextColor(textColor, textColor);
+  // Set text color: 0 = black (clear bit), 1 = white (set bit)
+  // For 1-bit mode, use 0 for black text
+  g_ttf.setTextColor(0, 0);
   
   fontLoaded = true;
   Serial.printf("[%lu] TrueTypeRenderer: Font loaded successfully\n", millis());
@@ -162,6 +91,7 @@ void TrueTypeRenderer::setCharacterSize(uint16_t size) {
 void TrueTypeRenderer::setTextColor(uint8_t color) {
   textColor = color;
   if (fontLoaded) {
+    // For 1-bit mode: 0 = black (clear bit), 1 = white (set bit)
     g_ttf.setTextColor(color, color);
   }
 }
@@ -172,7 +102,6 @@ void TrueTypeRenderer::drawText(int16_t x, int16_t y, const char* text) {
     return;
   }
   
-  activeInstance = this;
   g_ttf.textDraw(x, y, text);
 }
 

@@ -607,18 +607,15 @@ void TextViewerScreen::showPage() {
 
   unsigned long renderStart = millis();
 
-  // Check if we should use TTF rendering
-  loadCustomFont();
+  // TTF rendering disabled - bb_truetype is too slow (40+ sec/page) and
+  // layout metrics don't match TTF glyph widths causing text overlap.
+  // TODO: Integrate TTF metrics into layout system for proper support.
+  // loadCustomFont();
 
-  // Render to BW buffer
+  // Render to BW buffer using bitmap fonts
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
-  
-  if (useTtfRendering && ttfRenderer) {
-    renderPageWithTtf(layout);
-  } else {
-    layoutStrategy->renderPage(layout, textRenderer, layoutConfig);
-  }
+  layoutStrategy->renderPage(layout, textRenderer, layoutConfig);
 
   unsigned long renderEnd = millis();
 
@@ -1190,13 +1187,23 @@ void TextViewerScreen::renderPageWithTtf(const LayoutStrategy::PageLayout& layou
   ttfRenderer->setCharacterSize(ttfSize);
   ttfRenderer->setTextColor(0);  // Black
   
-  int wordCount = 0;
+  int lineCount = 0;
   for (const auto& line : layout.lines) {
-    for (const auto& word : line.words) {
-      // Render each word at its computed position
-      ttfRenderer->drawText(word.x, word.y, word.text.c_str());
-      wordCount++;
+    if (line.words.empty()) continue;
+    
+    // Build the full line text with spaces between words
+    String lineText;
+    for (size_t i = 0; i < line.words.size(); i++) {
+      if (i > 0) lineText += " ";
+      lineText += line.words[i].text;
     }
+    
+    // Use the first word's position as the line start
+    int16_t lineX = line.words[0].x;
+    int16_t lineY = line.words[0].y;
+    
+    ttfRenderer->drawText(lineX, lineY, lineText.c_str());
+    lineCount++;
   }
-  Serial.printf("[%lu] renderPageWithTtf: rendered %d words with TTF size %d\n", millis(), wordCount, ttfSize);
+  Serial.printf("[%lu] renderPageWithTtf: rendered %d lines with TTF size %d\n", millis(), lineCount, ttfSize);
 }
