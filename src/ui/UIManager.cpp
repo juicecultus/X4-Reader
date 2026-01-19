@@ -640,30 +640,42 @@ void UIManager::showSleepScreen() {
   }
 
 #ifdef USE_M5UNIFIED
-  // Paper S3: Use FastEPD's native 16-level grayscale for best quality
+  // Paper S3: Use the 2-bit grayscale path with FastEPD 4BPP conversion
   if (usedRandomCover && coverBmpPath.length() > 0) {
-    Serial.printf("[%lu] Sleep screen: attempting 4-bit grayscale decode for Paper S3\n", millis());
+    String lf = coverBmpPath;
+    lf.toLowerCase();
     
-    // Allocate 4-bit grayscale buffer (2 pixels per byte)
-    const size_t gray4Size = ((size_t)EInkDisplay::DISPLAY_WIDTH * EInkDisplay::DISPLAY_HEIGHT) / 2;
-    uint8_t* gray4Buffer = (uint8_t*)heap_caps_malloc(gray4Size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!gray4Buffer) {
-      gray4Buffer = (uint8_t*)malloc(gray4Size);
-    }
-    
-    if (gray4Buffer) {
-      sdManager.ensureSpiBusIdle();
-      if (ImageDecoder::decodeTo4BitGrayscale(coverBmpPath.c_str(), gray4Buffer, 
-                                               EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT)) {
-        Serial.printf("[%lu] Sleep screen: 4-bit grayscale decode success, displaying\n", millis());
-        display.display4BitGrayscale(gray4Buffer);
+    // For JPEG/PNG covers, decode with grayscale buffers and display
+    if (lf.endsWith(".jpg") || lf.endsWith(".jpeg") || lf.endsWith(".png")) {
+      Serial.printf("[%lu] Sleep screen: using 2-bit grayscale for %s\n", millis(), coverBmpPath.c_str());
+      
+      // Allocate grayscale buffers
+      uint8_t* grayLsb = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+      uint8_t* grayMsb = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+      
+      if (grayLsb && grayMsb) {
+        memset(grayLsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+        memset(grayMsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+        
+        // Re-decode with grayscale buffers
+        if (ImageDecoder::decodeToDisplayFitWidth(coverBmpPath.c_str(), display.getFrameBuffer(),
+            EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, grayLsb, grayMsb)) {
+          Serial.printf("[%lu] Sleep screen: grayscale decode success\n", millis());
+          display.copyGrayscaleBuffers(grayLsb, grayMsb);
+          display.displayGrayBuffer(true);
+        } else {
+          Serial.printf("[%lu] Sleep screen: grayscale decode failed, falling back to BW\n", millis());
+          display.displayBuffer(EInkDisplay::FULL_REFRESH);
+        }
       } else {
-        Serial.printf("[%lu] Sleep screen: 4-bit grayscale decode failed, falling back to BW\n", millis());
+        Serial.printf("[%lu] Sleep screen: OOM for grayscale buffers, falling back to BW\n", millis());
         display.displayBuffer(EInkDisplay::FULL_REFRESH);
       }
-      free(gray4Buffer);
+      
+      free(grayLsb);
+      free(grayMsb);
     } else {
-      Serial.printf("[%lu] Sleep screen: OOM for 4-bit buffer, falling back to BW\n", millis());
+      // BMP or other formats - just display BW
       display.displayBuffer(EInkDisplay::FULL_REFRESH);
     }
   } else {

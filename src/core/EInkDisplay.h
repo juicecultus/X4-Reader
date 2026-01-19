@@ -109,6 +109,12 @@ class EInkDisplay {
   bool inGrayscaleMode;
   bool drawGrayscale;
 
+#ifdef USE_M5UNIFIED
+  // Grayscale buffers for Paper S3 (stored for displayGrayBuffer conversion)
+  uint8_t* grayLsbBuffer;
+  uint8_t* grayMsbBuffer;
+#endif
+
   // Low-level display control
   void resetDisplay();
   void sendCommand(uint8_t command);

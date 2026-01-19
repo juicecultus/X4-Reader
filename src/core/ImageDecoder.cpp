@@ -4,6 +4,9 @@
 
 #include <new>
 
+// Use LGFX's TJpgDec for 4-bit grayscale decode - minimal stack usage
+#include <lgfx/utility/lgfx_tjpgd.h>
+
 static const char* pngErrName(int err) {
     switch (err) {
         case PNG_SUCCESS: return "PNG_SUCCESS";
@@ -1505,6 +1508,65 @@ void ImageDecoder::PNGDraw(PNGDRAW *pDraw)
     free(usPixels);
 }
 
+// Context structure for TJpgDec 4-bit grayscale decode
+struct TjpgGray4Ctx {
+    uint8_t* fileData;
+    size_t fileSize;
+    size_t filePos;
+    uint8_t* outBuf;
+    uint16_t targetW, targetH;
+    int16_t offsetX, offsetY;
+};
+
+// Static input function for TJpgDec - reads from memory buffer
+static uint32_t tjpgGray4Input(void* device, uint8_t* buf, uint32_t len) {
+    TjpgGray4Ctx* c = (TjpgGray4Ctx*)device;
+    uint32_t remain = c->fileSize - c->filePos;
+    uint32_t toRead = (len < remain) ? len : remain;
+    if (toRead > 0) {
+        memcpy(buf, c->fileData + c->filePos, toRead);
+        c->filePos += toRead;
+    }
+    return toRead;
+}
+
+// Static output function for TJpgDec - converts RGB888 to 4-bit grayscale
+static uint32_t tjpgGray4Output(void* device, void* bitmap, JRECT* rect) {
+    TjpgGray4Ctx* c = (TjpgGray4Ctx*)device;
+    uint8_t* rgb = (uint8_t*)bitmap;
+    
+    for (uint32_t y = rect->top; y <= rect->bottom; y++) {
+        int py = (int)y + c->offsetY;
+        if (py < 0 || py >= c->targetH) {
+            rgb += (rect->right - rect->left + 1) * 3;
+            continue;
+        }
+        
+        for (uint32_t x = rect->left; x <= rect->right; x++) {
+            int px = (int)x + c->offsetX;
+            uint8_t r = *rgb++;
+            uint8_t g = *rgb++;
+            uint8_t b = *rgb++;
+            
+            if (px < 0 || px >= c->targetW) continue;
+            
+            // Convert to luminance then to 4-bit
+            uint8_t lum = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
+            uint8_t gray4 = lum >> 4;
+            
+            // Pack into buffer (2 pixels per byte, high nibble first)
+            size_t idx = (size_t)py * c->targetW + px;
+            size_t byteIdx = idx / 2;
+            if (idx & 1) {
+                c->outBuf[byteIdx] = (c->outBuf[byteIdx] & 0xF0) | gray4;
+            } else {
+                c->outBuf[byteIdx] = (c->outBuf[byteIdx] & 0x0F) | (gray4 << 4);
+            }
+        }
+    }
+    return 1;
+}
+
 // Decode image to 4-bit grayscale buffer for FastEPD's native 16-level grayscale
 bool ImageDecoder::decodeTo4BitGrayscale(const char* path, uint8_t* gray4Buffer, uint16_t targetWidth, uint16_t targetHeight) {
     if (!path || !gray4Buffer) return false;
@@ -1557,70 +1619,98 @@ bool ImageDecoder::decodeTo4BitGrayscale(const char* path, uint8_t* gray4Buffer,
     bool success = false;
     
     if (isJpeg) {
+        // Use JPEGDEC with RAM buffer - it handles more JPEG formats than TJpgDec
         JPEGDEC jpeg;
-        if (jpeg.openRAM(fileData, fileSize, [](JPEGDRAW* pDraw) -> int {
-            // Context: gray4Buffer, targetWidth, targetHeight stored in pDraw->pUser
-            struct Gray4Ctx {
-                uint8_t* buf;
-                uint16_t w, h;
-                int16_t offsetX, offsetY;
-                uint16_t imgW, imgH;
+        
+        // Store context in a static so the callback can access it
+        static TjpgGray4Ctx* s_gray4Ctx = nullptr;
+        TjpgGray4Ctx ctx;
+        ctx.fileData = fileData;
+        ctx.fileSize = fileSize;
+        ctx.filePos = 0;
+        ctx.outBuf = gray4Buffer;
+        ctx.targetW = targetWidth;
+        ctx.targetH = targetHeight;
+        ctx.offsetX = 0;
+        ctx.offsetY = 0;
+        s_gray4Ctx = &ctx;
+        
+        Serial.printf("JPEGDEC 4-bit: fileSize=%u, first bytes: %02X %02X %02X %02X\n", 
+            (unsigned)fileSize, fileData[0], fileData[1], fileData[2], fileData[3]);
+        
+        // JPEG draw callback for 4-bit grayscale with contrast enhancement
+        auto jpegDraw4bit = [](JPEGDRAW* pDraw) -> int {
+            TjpgGray4Ctx* c = s_gray4Ctx;
+            if (!c) return 0;
+            
+            // Aggressive gamma/contrast LUT for e-ink display
+            // Input: 0=black, 15=white (from luminance >> 4)
+            // Output: 0=black, 15=white (for FastEPD 4BPP)
+            // This LUT applies gamma ~2.2 and stretches contrast significantly
+            static const uint8_t gammaLUT[16] = {
+                0, 0, 0, 1, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15
             };
-            Gray4Ctx* ctx = (Gray4Ctx*)pDraw->pUser;
             
             for (int y = 0; y < pDraw->iHeight; y++) {
-                int py = pDraw->y + y + ctx->offsetY;
-                if (py < 0 || py >= ctx->h) continue;
+                int py = pDraw->y + y + c->offsetY;
+                if (py < 0 || py >= c->targetH) continue;
                 
                 for (int x = 0; x < pDraw->iWidth; x++) {
-                    int px = pDraw->x + x + ctx->offsetX;
-                    if (px < 0 || px >= ctx->w) continue;
+                    int px = pDraw->x + x + c->offsetX;
+                    if (px < 0 || px >= c->targetW) continue;
                     
                     uint16_t rgb565 = pDraw->pPixels[y * pDraw->iWidth + x];
+                    // RGB565 to luminance
                     uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
                     uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
                     uint8_t b = (rgb565 & 0x1F) << 3;
                     uint8_t lum = (uint8_t)((r * 77 + g * 150 + b * 29) >> 8);
                     
-                    // Convert to 4-bit (0-15), where 0=black, 15=white
-                    uint8_t gray4 = lum >> 4;
+                    // Convert to 4-bit and apply gamma correction
+                    uint8_t gray4 = gammaLUT[lum >> 4];
                     
                     // Pack into buffer (2 pixels per byte, high nibble first)
-                    size_t idx = (size_t)py * ctx->w + px;
+                    size_t idx = (size_t)py * c->targetW + px;
                     size_t byteIdx = idx / 2;
                     if (idx & 1) {
-                        ctx->buf[byteIdx] = (ctx->buf[byteIdx] & 0xF0) | gray4;
+                        c->outBuf[byteIdx] = (c->outBuf[byteIdx] & 0xF0) | gray4;
                     } else {
-                        ctx->buf[byteIdx] = (ctx->buf[byteIdx] & 0x0F) | (gray4 << 4);
+                        c->outBuf[byteIdx] = (c->outBuf[byteIdx] & 0x0F) | (gray4 << 4);
                     }
                 }
             }
             return 1;
-        })) {
+        };
+        
+        if (jpeg.openRAM(fileData, fileSize, jpegDraw4bit)) {
             int imgW = jpeg.getWidth();
             int imgH = jpeg.getHeight();
             
-            // Calculate scale to fit width
+            // Calculate scale to fit
             int scale = 1;
-            while ((imgW / (scale + 1)) >= targetWidth && scale < 8) scale++;
+            while ((imgW / (scale * 2)) >= targetWidth && scale < 8) scale *= 2;
             
             int scaledW = imgW / scale;
             int scaledH = imgH / scale;
-            int offsetX = (targetWidth - scaledW) / 2;
-            int offsetY = (targetHeight - scaledH) / 2;
+            ctx.offsetX = (targetWidth - scaledW) / 2;
+            ctx.offsetY = (targetHeight - scaledH) / 2;
             
-            struct Gray4Ctx {
-                uint8_t* buf;
-                uint16_t w, h;
-                int16_t offsetX, offsetY;
-                uint16_t imgW, imgH;
-            } ctx = { gray4Buffer, targetWidth, targetHeight, (int16_t)offsetX, (int16_t)offsetY, (uint16_t)scaledW, (uint16_t)scaledH };
+            Serial.printf("JPEGDEC 4-bit: %dx%d -> scale 1/%d -> %dx%d, offset (%d,%d)\n",
+                imgW, imgH, scale, scaledW, scaledH, ctx.offsetX, ctx.offsetY);
             
-            jpeg.setUserPointer(&ctx);
             jpeg.setPixelType(RGB565_BIG_ENDIAN);
-            success = jpeg.decode(0, 0, scale == 1 ? 0 : (scale == 2 ? JPEG_SCALE_HALF : (scale <= 4 ? JPEG_SCALE_QUARTER : JPEG_SCALE_EIGHTH))) == 1;
+            int scaleFlag = (scale == 1) ? 0 : (scale == 2) ? JPEG_SCALE_HALF : 
+                           (scale == 4) ? JPEG_SCALE_QUARTER : JPEG_SCALE_EIGHTH;
+            success = (jpeg.decode(0, 0, scaleFlag) == 1);
             jpeg.close();
+            
+            if (!success) {
+                Serial.println("JPEGDEC 4-bit: decode failed");
+            }
+        } else {
+            Serial.println("JPEGDEC 4-bit: openRAM failed");
         }
+        s_gray4Ctx = nullptr;
     } else if (isPng) {
         // PNG 4-bit grayscale: use existing decode path and convert
         // For simplicity, decode to 1-bit first then we'll handle it in the display

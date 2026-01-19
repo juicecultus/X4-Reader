@@ -132,6 +132,8 @@ EInkDisplay::EInkDisplay(int8_t sclk, int8_t mosi, int8_t cs, int8_t dc, int8_t 
 #ifdef USE_M5UNIFIED
       frameBuffer0(nullptr),
       frameBuffer1(nullptr),
+      grayLsbBuffer(nullptr),
+      grayMsbBuffer(nullptr),
 #endif
       frameBuffer(nullptr),
       frameBufferActive(nullptr),
@@ -487,7 +489,15 @@ void EInkDisplay::grayscaleRevert() {
 }
 
 void EInkDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) {
-#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
+#ifdef USE_M5UNIFIED
+  // Paper S3: Store LSB buffer for later conversion in displayGrayBuffer
+  if (!grayLsbBuffer) {
+    grayLsbBuffer = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+  if (grayLsbBuffer && lsbBuffer) {
+    memcpy(grayLsbBuffer, lsbBuffer, BUFFER_SIZE);
+  }
+#elif defined(ARDUINO)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_BW, lsbBuffer, BUFFER_SIZE);
 #else
@@ -496,7 +506,15 @@ void EInkDisplay::copyGrayscaleLsbBuffers(const uint8_t* lsbBuffer) {
 }
 
 void EInkDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) {
-#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
+#ifdef USE_M5UNIFIED
+  // Paper S3: Store MSB buffer for later conversion in displayGrayBuffer
+  if (!grayMsbBuffer) {
+    grayMsbBuffer = (uint8_t*)heap_caps_malloc(BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+  if (grayMsbBuffer && msbBuffer) {
+    memcpy(grayMsbBuffer, msbBuffer, BUFFER_SIZE);
+  }
+#elif defined(ARDUINO)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_RED, msbBuffer, BUFFER_SIZE);
 #else
@@ -505,7 +523,10 @@ void EInkDisplay::copyGrayscaleMsbBuffers(const uint8_t* msbBuffer) {
 }
 
 void EInkDisplay::copyGrayscaleBuffers(const uint8_t* lsbBuffer, const uint8_t* msbBuffer) {
-#if defined(ARDUINO) && !defined(USE_M5UNIFIED)
+#ifdef USE_M5UNIFIED
+  copyGrayscaleLsbBuffers(lsbBuffer);
+  copyGrayscaleMsbBuffers(msbBuffer);
+#elif defined(ARDUINO)
   setRamArea(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT);
   writeRamBuffer(CMD_WRITE_RAM_BW, lsbBuffer, BUFFER_SIZE);
   writeRamBuffer(CMD_WRITE_RAM_RED, msbBuffer, BUFFER_SIZE);
@@ -637,36 +658,29 @@ void EInkDisplay::display4BitGrayscale(const uint8_t* gray4Buffer) {
 #ifdef USE_M5UNIFIED
   if (!gray4Buffer) return;
   
-  // Paper S3: Use FastEPD's native 4-bit grayscale mode for best quality
+  // Paper S3: Use FastEPD's native 4-bit grayscale mode
   Serial.printf("[%lu] display4BitGrayscale: switching to 4BPP mode\n", millis());
   g_epd.setMode(BB_MODE_4BPP);
+  g_epd.setRotation(90);  // Restore portrait orientation after mode switch
   g_epd.fillScreen(0xF);  // Fill with white (15)
   
-  // FastEPD in 4BPP mode: native resolution is 960x540 (landscape)
-  // Our portrait buffer: 540w x 960h, packed 2 pixels per byte
-  // FastEPD landscape: 960w x 540h
-  // Rotation: portrait (px, py) -> landscape (py, 539-px)
-  const int nativeW = 960;
-  const int nativeH = 540;
+  Serial.printf("[%lu] display4BitGrayscale: drawing pixels (w=%d h=%d)\n", millis(), g_epd.width(), g_epd.height());
   
+  // Our portrait buffer: 540w x 960h, packed 2 pixels per byte
   for (int py = 0; py < DISPLAY_HEIGHT; py++) {
     for (int px = 0; px < DISPLAY_WIDTH; px++) {
       // Read from our portrait buffer (2 pixels per byte, high nibble first)
       size_t idx = (size_t)py * DISPLAY_WIDTH + px;
       size_t byteIdx = idx / 2;
-      uint8_t gray;
+      uint8_t gray4;
       if (idx & 1) {
-        gray = gray4Buffer[byteIdx] & 0x0F;
+        gray4 = gray4Buffer[byteIdx] & 0x0F;
       } else {
-        gray = (gray4Buffer[byteIdx] >> 4) & 0x0F;
+        gray4 = (gray4Buffer[byteIdx] >> 4) & 0x0F;
       }
       
-      // Map portrait (px, py) to FastEPD landscape coordinates
-      int fx = py;
-      int fy = (DISPLAY_WIDTH - 1) - px;
-      if (fx >= 0 && fx < nativeW && fy >= 0 && fy < nativeH) {
-        g_epd.drawPixel(fx, fy, gray);
-      }
+      // Use FastEPD's pixel function which handles rotation
+      g_epd.drawPixel(px, py, gray4);
     }
   }
   
@@ -674,8 +688,9 @@ void EInkDisplay::display4BitGrayscale(const uint8_t* gray4Buffer) {
   g_epd.fullUpdate(CLEAR_SLOW, true, NULL);
   g_epd.backupPlane();
   
-  // Switch back to 1BPP mode for normal operation
+  // Switch back to 1BPP mode and restore rotation
   g_epd.setMode(BB_MODE_1BPP);
+  g_epd.setRotation(90);
   Serial.printf("[%lu] display4BitGrayscale: done\n", millis());
 #else
   (void)gray4Buffer;
@@ -684,10 +699,81 @@ void EInkDisplay::display4BitGrayscale(const uint8_t* gray4Buffer) {
 
 void EInkDisplay::displayGrayBuffer(bool turnOffScreen) {
 #ifdef USE_M5UNIFIED
-  // Paper S3: FastEPD handles grayscale internally; no custom LUT needed.
+  // Paper S3: Convert LSB/MSB grayscale buffers to FastEPD 4BPP and display
   drawGrayscale = false;
   inGrayscaleMode = true;
   (void)turnOffScreen;
+  
+  if (!grayLsbBuffer || !grayMsbBuffer || !frameBuffer) {
+    Serial.printf("[%lu] displayGrayBuffer: missing buffers, falling back to BW\n", millis());
+    displayBuffer(FULL_REFRESH);
+    return;
+  }
+  
+  Serial.printf("[%lu] displayGrayBuffer: converting LSB/MSB to 4BPP\n", millis());
+  
+  // Switch to 4BPP mode (uses default M5 grayscale matrix)
+  g_epd.setMode(BB_MODE_4BPP);
+  g_epd.setRotation(90);  // Portrait orientation
+  g_epd.fillScreen(0xF);  // White background
+  
+  // Convert LSB/MSB + BW to 4-bit grayscale
+  // Quantization in ImageDecoder: q=0 black, q=1 dark gray, q=2 light gray, q=3 white
+  // LSB buffer: bit=1 means q==1 (dark gray)
+  // MSB buffer: bit=1 means q==1 or q==2 (any gray)
+  // BW framebuffer: bit=1 means white (q>=2), bit=0 means black (q<2)
+  //
+  // Decoding:
+  //   LSB=0, MSB=0 -> use BW (black or white)
+  //   LSB=1, MSB=1 -> dark gray (q=1)
+  //   LSB=0, MSB=1 -> light gray (q=2)
+  //   LSB=1, MSB=0 -> shouldn't happen
+  //
+  // FastEPD 4BPP: 0=black, 15=white
+  
+  for (int py = 0; py < DISPLAY_HEIGHT; py++) {
+    for (int px = 0; px < DISPLAY_WIDTH; px++) {
+      const size_t byteIdx = (size_t)py * DISPLAY_WIDTH_BYTES + (px / 8);
+      const uint8_t bitMask = 0x80 >> (px & 7);
+      
+      const bool bwWhite = (frameBuffer[byteIdx] & bitMask) != 0;
+      const bool lsbSet = (grayLsbBuffer[byteIdx] & bitMask) != 0;
+      const bool msbSet = (grayMsbBuffer[byteIdx] & bitMask) != 0;
+      
+      uint8_t gray4;
+      if (!lsbSet && !msbSet) {
+        // No gray - use BW value
+        gray4 = bwWhite ? 0xF : 0x0;
+      } else if (lsbSet && msbSet) {
+        // Dark gray (q=1) - use level 2 for darker appearance
+        gray4 = 0x2;
+      } else if (!lsbSet && msbSet) {
+        // Light gray (q=2) - use level 11 for lighter appearance
+        gray4 = 0xB;
+      } else {
+        // LSB=1, MSB=0 - shouldn't happen, use medium
+        gray4 = 0x6;
+      }
+      
+      g_epd.drawPixel(px, py, gray4);
+    }
+  }
+  
+  Serial.printf("[%lu] displayGrayBuffer: calling fullUpdate with CLEAR_NONE\n", millis());
+  g_epd.fullUpdate(CLEAR_NONE, true, NULL);
+  g_epd.backupPlane();
+  
+  // Switch back to 1BPP mode
+  g_epd.setMode(BB_MODE_1BPP);
+  g_epd.setRotation(90);
+  
+  // Free grayscale buffers
+  free(grayLsbBuffer);
+  free(grayMsbBuffer);
+  grayLsbBuffer = nullptr;
+  grayMsbBuffer = nullptr;
+  
+  Serial.printf("[%lu] displayGrayBuffer: done\n", millis());
 #elif defined(ARDUINO) && !defined(USE_M5UNIFIED)
   drawGrayscale = false;
   inGrayscaleMode = true;
