@@ -294,6 +294,7 @@ TextViewerScreen::TextViewerScreen(EInkDisplay& display, TextRenderer& renderer,
 TextViewerScreen::~TextViewerScreen() {
   delete layoutStrategy;
   delete provider;
+  unloadCustomFont();
 }
 
 void TextViewerScreen::closeDocument() {
@@ -606,10 +607,18 @@ void TextViewerScreen::showPage() {
 
   unsigned long renderStart = millis();
 
+  // Check if we should use TTF rendering
+  loadCustomFont();
+
   // Render to BW buffer
   textRenderer.setFrameBuffer(display.getFrameBuffer());
   textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
-  layoutStrategy->renderPage(layout, textRenderer, layoutConfig);
+  
+  if (useTtfRendering && ttfRenderer) {
+    renderPageWithTtf(layout);
+  } else {
+    layoutStrategy->renderPage(layout, textRenderer, layoutConfig);
+  }
 
   unsigned long renderEnd = millis();
 
@@ -679,7 +688,8 @@ void TextViewerScreen::showPage() {
   const bool doCondition = (refreshFrequency > 0) && (pageRenderCounter > 0) && ((pageRenderCounter % refreshFrequency) == 0);
   display.displayBuffer(doCondition ? EInkDisplay::FULL_REFRESH : EInkDisplay::FAST_REFRESH);
 
-  if (!doCondition && display.supportsGrayscale()) {
+  // Grayscale rendering only for bitmap fonts (TTF doesn't support grayscale bitmaps)
+  if (!doCondition && display.supportsGrayscale() && !useTtfRendering) {
     // grayscale rendering
     {
       textRenderer.setTextColor(TextRenderer::COLOR_BLACK);
@@ -1112,4 +1122,73 @@ void TextViewerScreen::showErrorMessage(const char* msg) {
   textRenderer.print(msg);
 
   display.displayBuffer(EInkDisplay::FAST_REFRESH);
+}
+
+void TextViewerScreen::loadCustomFont() {
+  Settings& s = uiManager.getSettings();
+  String fontPath;
+  
+  if (!s.getString(String("settings.customFont"), fontPath) || fontPath.length() == 0) {
+    // No custom font configured
+    unloadCustomFont();
+    return;
+  }
+  
+  // Check if font path changed
+  if (fontPath == customFontPath && ttfRenderer != nullptr) {
+    return;  // Already loaded
+  }
+  
+  // Unload previous font
+  unloadCustomFont();
+  
+  // Load new font
+  Serial.printf("[%lu] TextViewerScreen: Loading custom font: %s\n", millis(), fontPath.c_str());
+  ttfRenderer = new TrueTypeRenderer(display);
+  if (ttfRenderer->loadFont(fontPath.c_str())) {
+    customFontPath = fontPath;
+    useTtfRendering = true;
+    Serial.printf("[%lu] TextViewerScreen: Custom font loaded successfully\n", millis());
+  } else {
+    Serial.printf("[%lu] TextViewerScreen: Failed to load custom font\n", millis());
+    delete ttfRenderer;
+    ttfRenderer = nullptr;
+    customFontPath = "";
+    useTtfRendering = false;
+  }
+}
+
+void TextViewerScreen::unloadCustomFont() {
+  if (ttfRenderer != nullptr) {
+    ttfRenderer->closeFont();
+    delete ttfRenderer;
+    ttfRenderer = nullptr;
+  }
+  customFontPath = "";
+  useTtfRendering = false;
+}
+
+void TextViewerScreen::renderPageWithTtf(const LayoutStrategy::PageLayout& layout) {
+  if (!ttfRenderer) return;
+  
+  // Map bitmap font size to TTF character size
+  // The bitmap fonts are roughly: 26pt small, 28pt medium, 30pt large
+  // TTF sizes need adjustment based on visual matching
+  uint16_t ttfSize = 28;  // Default
+  
+  // Get current font size from settings to match
+  Settings& s = uiManager.getSettings();
+  int fontSize = 28;
+  s.getInt(String("settings.fontSize"), fontSize);
+  ttfSize = (uint16_t)fontSize;
+  
+  ttfRenderer->setCharacterSize(ttfSize);
+  ttfRenderer->setTextColor(0);  // Black
+  
+  for (const auto& line : layout.lines) {
+    for (const auto& word : line.words) {
+      // Render each word at its computed position
+      ttfRenderer->drawText(word.x, word.y, word.text.c_str());
+    }
+  }
 }

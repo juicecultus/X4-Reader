@@ -5,6 +5,7 @@
 #include "../../core/EInkDisplay.h"
 #include "../../core/SDCardManager.h"
 #include "../../rendering/TextRenderer.h"
+#include "../../rendering/TrueTypeRenderer.h"
 #include "../../text/layout/LayoutStrategy.h"
 #include "../UIManager.h"
 #include "Screen.h"
@@ -68,6 +69,17 @@ class TextViewerScreen : public Screen {
   String pendingOpenPath;
   // Whether to show chapter numbers in the page indicator
   bool showChapterNumbers = true;
+  
+  // TTF rendering support
+  TrueTypeRenderer* ttfRenderer = nullptr;
+  String customFontPath;
+  bool useTtfRendering = false;
+  
+  // Load/unload custom TTF font based on settings
+  void loadCustomFont();
+  void unloadCustomFont();
+  // Render page layout using TTF renderer
+  void renderPageWithTtf(const LayoutStrategy::PageLayout& layout);
 
   String noDocumentMessage;
 
