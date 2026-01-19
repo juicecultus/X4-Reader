@@ -1345,7 +1345,7 @@ Language EpubWordProvider::getLanguage() const {
   return stringToLanguage(langStr);
 }
 
-String EpubWordProvider::getCoverImagePath(bool extractIfMissing) const {
+String EpubWordProvider::getCoverImagePath(bool extractIfMissing) {
   if (!isEpub_ || !epubReader_) {
     return String("");
   }

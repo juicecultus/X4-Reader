@@ -25,7 +25,7 @@ class SettingsScreen : public Screen {
 
   // Menu navigation
   int selectedIndex = 0;
-  static constexpr int SETTINGS_COUNT = 20;
+  static constexpr int SETTINGS_COUNT = 21;
 
   // Setting values and their current indices
   int marginIndex = 1;
@@ -41,6 +41,9 @@ class SettingsScreen : public Screen {
 
   // Cover quality: 0=Standard (1-bit), 1=Grayscale (2-bit)
   int coverQualityIndex = 1;  // Default to grayscale
+
+  // Show book cover in reader: 0=Off, 1=On
+  int showBookCoverIndex = 1;  // Default to on
 
   // Reading orientation: 0=Portrait, 1=Landscape
   int orientationIndex = 0;

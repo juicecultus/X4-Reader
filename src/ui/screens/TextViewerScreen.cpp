@@ -303,6 +303,7 @@ void TextViewerScreen::closeDocument() {
   loadedText = String("");
   currentFilePath = String("");
   noDocumentMessage = String("");
+  cachedNonEmptyCount = -1;  // Reset chapter cache
   epub_release_shared_buffers();
 }
 
@@ -466,6 +467,130 @@ String TextViewerScreen::getChapterName(int chapterIndex) const {
   return provider->getChapterName(chapterIndex);
 }
 
+bool TextViewerScreen::isChapterEmpty(int chapterIndex) const {
+  if (!provider || !provider->hasChapters()) {
+    return false;
+  }
+  
+  // Use cached list if available
+  if (cachedNonEmptyCount >= 0) {
+    for (int i = 0; i < cachedNonEmptyCount; i++) {
+      if (cachedNonEmptyChapters[i] == chapterIndex) {
+        return false;  // Found in non-empty list
+      }
+    }
+    return true;  // Not in non-empty list = empty
+  }
+  
+  // Fallback: check directly (slow path)
+  int savedChapter = provider->getCurrentChapter();
+  int savedIndex = provider->getCurrentIndex();
+  
+  provider->setChapter(chapterIndex);
+  bool hasContent = provider->hasNextWord();
+  
+  provider->setChapter(savedChapter);
+  provider->setPosition(savedIndex);
+  
+  return !hasContent;
+}
+
+void TextViewerScreen::buildNonEmptyChapterCache() {
+  if (!provider || !provider->hasChapters()) {
+    cachedNonEmptyCount = 0;
+    return;
+  }
+  
+  // Try to load from file first
+  if (loadChapterCacheFromFile()) {
+    Serial.printf("[%lu] Loaded chapter cache from file: %d non-empty chapters\n", millis(), cachedNonEmptyCount);
+    return;
+  }
+  
+  Serial.printf("[%lu] Building chapter cache...\n", millis());
+  unsigned long startTime = millis();
+  
+  // Show loading message to user
+  display.clearScreen(0xFF);
+  textRenderer.setFrameBuffer(display.getFrameBuffer());
+  textRenderer.setBitmapType(TextRenderer::BITMAP_BW);
+  textRenderer.setTextColor(TextRenderer::COLOR_BLACK);
+  textRenderer.setFont(getMainFont());
+  
+  const char* msg = "Building chapter cache...";
+  int16_t x1, y1;
+  uint16_t w, h;
+  textRenderer.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
+  int16_t centerX = (EInkDisplay::DISPLAY_WIDTH - w) / 2;
+  int16_t centerY = EInkDisplay::DISPLAY_HEIGHT / 2;
+  textRenderer.setCursor(centerX, centerY);
+  textRenderer.print(msg);
+  display.displayBuffer(EInkDisplay::FAST_REFRESH);
+  
+  int savedChapter = provider->getCurrentChapter();
+  int savedIndex = provider->getCurrentIndex();
+  
+  cachedNonEmptyCount = 0;
+  int totalChapters = provider->getChapterCount();
+  
+  for (int i = 0; i < totalChapters && cachedNonEmptyCount < MAX_CACHED_CHAPTERS; i++) {
+    provider->setChapter(i);
+    if (provider->hasNextWord()) {
+      cachedNonEmptyChapters[cachedNonEmptyCount++] = i;
+    }
+  }
+  
+  // Restore state
+  provider->setChapter(savedChapter);
+  provider->setPosition(savedIndex);
+  
+  Serial.printf("[%lu] Built chapter cache: %d non-empty of %d total (%lu ms)\n", 
+                millis(), cachedNonEmptyCount, totalChapters, millis() - startTime);
+  
+  // Save to file for next time
+  saveChapterCacheToFile();
+}
+
+bool TextViewerScreen::loadChapterCacheFromFile() {
+  if (currentFilePath.length() == 0) return false;
+  
+  String cachePath = currentFilePath + ".chapters";
+  sdManager.ensureSpiBusIdle();
+  if (!SD.exists(cachePath.c_str())) return false;
+  
+  File f = SD.open(cachePath.c_str(), FILE_READ);
+  if (!f) return false;
+  
+  cachedNonEmptyCount = 0;
+  while (f.available() && cachedNonEmptyCount < MAX_CACHED_CHAPTERS) {
+    String line = f.readStringUntil('\n');
+    line.trim();
+    if (line.length() > 0) {
+      cachedNonEmptyChapters[cachedNonEmptyCount++] = line.toInt();
+    }
+  }
+  f.close();
+  return cachedNonEmptyCount > 0;
+}
+
+void TextViewerScreen::saveChapterCacheToFile() {
+  if (currentFilePath.length() == 0 || cachedNonEmptyCount <= 0) return;
+  
+  String cachePath = currentFilePath + ".chapters";
+  sdManager.ensureSpiBusIdle();
+  File f = SD.open(cachePath.c_str(), FILE_WRITE);
+  if (!f) {
+    Serial.printf("[%lu] Failed to save chapter cache to %s\n", millis(), cachePath.c_str());
+    return;
+  }
+  
+  for (int i = 0; i < cachedNonEmptyCount; i++) {
+    f.println(cachedNonEmptyChapters[i]);
+  }
+  f.close();
+  Serial.printf("[%lu] Saved chapter cache to %s\n", millis(), cachePath.c_str());
+}
+
 void TextViewerScreen::goToChapterStart(int chapterIndex) {
   if (!provider) {
     return;
@@ -501,8 +626,12 @@ void TextViewerScreen::handleButtons(Buttons& buttons) {
     // EPUB opens have the best chance of succeeding.
     closeDocument();
 
+    // Full refresh to clear any ghosting before showing file browser
+    display.displayBuffer(EInkDisplay::FULL_REFRESH);
     uiManager.showScreen(UIManager::ScreenId::FileBrowser);
   } else if (buttons.isPressed(Buttons::CONFIRM)) {
+    // Full refresh to clear any ghosting before showing settings
+    display.displayBuffer(EInkDisplay::FULL_REFRESH);
     // Open settings
     uiManager.showScreen(UIManager::ScreenId::Settings);
   } else if (buttons.wasReleased(Buttons::LEFT) || buttons.wasReleased(Buttons::VOLUME_UP)) {
@@ -538,6 +667,11 @@ void TextViewerScreen::showPage() {
 
   // Apply current settings from memory to layout config
   loadSettingsFromFile();
+
+  // Try to show cover page if at beginning of book
+  if (showCoverPage()) {
+    return;  // Cover was displayed, don't show text
+  }
 
   if (!provider) {
     // No provider available (no file open). Show a helpful message instead
@@ -719,6 +853,13 @@ void TextViewerScreen::nextPage() {
   if (!provider)
     return;
 
+  // If showing cover, just advance to first text page
+  if (showingCover) {
+    showingCover = false;
+    showPage();
+    return;
+  }
+
   // Check if there are more words in current chapter (use chapter percentage, not book percentage)
   uint32_t chapterPct = provider->getChapterPercentage(pageEndIndex);
   Serial.printf("nextPage: chapterPct=%u pageEndIndex=%d\n", (unsigned)chapterPct, pageEndIndex);
@@ -727,19 +868,30 @@ void TextViewerScreen::nextPage() {
     provider->setPosition(pageEndIndex);
     showPage();
   } else {
-    // End of chapter - try to move to next chapter
+    // End of chapter - try to move to next chapter, skipping empty ones
     if (provider->hasChapters()) {
       int currentChapter = provider->getCurrentChapter();
       int chapterCount = provider->getChapterCount();
       Serial.printf("nextPage: at end of chapter %d/%d, advancing...\n", currentChapter + 1, chapterCount);
-      if (currentChapter + 1 < chapterCount) {
-        provider->setChapter(currentChapter + 1);
+      
+      // Find next non-empty chapter
+      int nextChapter = currentChapter + 1;
+      while (nextChapter < chapterCount) {
+        provider->setChapter(nextChapter);
         pageStartIndex = 0;
         pageEndIndex = 0;
-        showPage();
-      } else {
-        Serial.println("nextPage: already at last chapter, no action");
+        // Check if chapter has content
+        if (provider->hasNextWord()) {
+          provider->setPosition(0);  // Reset to start
+          showPage();
+          return;
+        }
+        Serial.printf("nextPage: skipping empty chapter %d\n", nextChapter);
+        nextChapter++;
       }
+      // No more chapters with content
+      Serial.println("nextPage: no more chapters with content");
+      provider->setChapter(currentChapter);  // Stay on current chapter
     } else {
       Serial.println("nextPage: no chapters, at end of document");
     }
@@ -750,18 +902,39 @@ void TextViewerScreen::prevPage() {
   if (!provider)
     return;
 
+  // If at chapter 0, position 0 and not showing cover, show cover
+  int currentChapterIdx = provider->hasChapters() ? provider->getCurrentChapter() : 0;
+  if (currentChapterIdx == 0 && pageStartIndex == 0 && !showingCover) {
+    // Check if this book has a cover
+    String coverPath = provider->getCoverImagePath(false);
+    if (coverPath.length() > 0) {
+      showingCover = true;
+      showPage();
+      return;
+    }
+  }
+
   // If at the beginning of current chapter, try to go to previous chapter
   if (!provider->hasPrevWord()) {
     if (provider->hasChapters()) {
       int currentChapter = provider->getCurrentChapter();
-      if (currentChapter > 0) {
-        // Go to previous chapter and position at the end
-        provider->setChapter(currentChapter - 1);
-        // Go to end of previous chapter by setting position to a large value
-        // then use getPreviousPageStart to find the last page
-        provider->setPosition(0x7FFFFFFF);  // Seek to end
-        pageStartIndex = provider->getCurrentIndex();
-        pageEndIndex = pageStartIndex;
+      // Find previous non-empty chapter
+      int prevChapter = currentChapter - 1;
+      while (prevChapter >= 0) {
+        provider->setChapter(prevChapter);
+        if (provider->hasNextWord()) {
+          // Found a chapter with content - go to end
+          provider->setPosition(0x7FFFFFFF);  // Seek to end
+          pageStartIndex = provider->getCurrentIndex();
+          pageEndIndex = pageStartIndex;
+          break;
+        }
+        Serial.printf("prevPage: skipping empty chapter %d\n", prevChapter);
+        prevChapter--;
+      }
+      if (prevChapter < 0) {
+        // No previous chapters with content, stay on current
+        provider->setChapter(currentChapter);
       }
     }
     // If we can't go to previous chapter (or no chapters), do nothing
@@ -1032,6 +1205,11 @@ void TextViewerScreen::openFile(const String& sdPath) {
   unsigned long provMs = millis() - provStart;
   Serial.printf("  Provider setup took  %lu ms\n", provMs);
 
+  // Build/load non-empty chapter cache for fast TOC access
+  if (provider->hasChapters()) {
+    buildNonEmptyChapterCache();
+  }
+
   unsigned long endTime = millis();
   Serial.printf("Opened file  %s  in  %lu ms\n", sdPath.c_str(), endTime - startTime);
 }
@@ -1061,6 +1239,7 @@ void TextViewerScreen::loadPositionFromFile() {
     currentChapter = 0;
     pageStartIndex = 0;
     pageEndIndex = 0;
+    showingCover = true;  // Show cover for new books
     return;
   }
 
@@ -1090,10 +1269,13 @@ void TextViewerScreen::loadPositionFromFile() {
     currentChapter = chapter;
     pageStartIndex = position;
     pageEndIndex = 0;
+    // Show cover if resuming at the very beginning
+    showingCover = (chapter == 0 && position == 0);
   } else {
     currentChapter = 0;
     pageStartIndex = 0;
     pageEndIndex = 0;
+    showingCover = true;  // Show cover for new books
   }
 }
 
@@ -1206,4 +1388,78 @@ void TextViewerScreen::renderPageWithTtf(const LayoutStrategy::PageLayout& layou
     lineCount++;
   }
   Serial.printf("[%lu] renderPageWithTtf: rendered %d lines with TTF size %d\n", millis(), lineCount, ttfSize);
+}
+
+bool TextViewerScreen::showCoverPage() {
+  // Only show cover if showingCover flag is set
+  // This flag is set on initial book open and when navigating back from first page
+  if (!showingCover) return false;
+  if (!provider) return false;
+  
+  // Check if book cover display is enabled
+  Settings& s = uiManager.getSettings();
+  int showBookCover = 1;
+  s.getInt(String("settings.showBookCover"), showBookCover);
+  if (showBookCover == 0) {
+    showingCover = false;
+    return false;
+  }
+  
+  // Check if this provider has a cover
+  String coverPath = provider->getCoverImagePath(true);
+  if (coverPath.length() == 0 || !SD.exists(coverPath.c_str())) {
+    showingCover = false;
+    return false;
+  }
+  
+  Serial.printf("[%lu] showCoverPage: displaying cover %s\n", millis(), coverPath.c_str());
+  
+  // Check cover quality setting (reuse s from above)
+  int coverQuality = 1;  // Default to grayscale
+  s.getInt(String("settings.coverQuality"), coverQuality);
+  
+  display.clearScreen(0xFF);
+  
+  String lf = coverPath;
+  lf.toLowerCase();
+  bool isJpgPng = lf.endsWith(".jpg") || lf.endsWith(".jpeg") || lf.endsWith(".png");
+  
+  if (coverQuality == 1 && isJpgPng && display.supportsGrayscale()) {
+    // Grayscale rendering (2-bit)
+    Serial.printf("[%lu] showCoverPage: using grayscale rendering\n", millis());
+    
+    uint8_t* grayLsb = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+    uint8_t* grayMsb = (uint8_t*)heap_caps_malloc(EInkDisplay::BUFFER_SIZE, MALLOC_CAP_8BIT);
+    
+    if (grayLsb && grayMsb) {
+      memset(grayLsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+      memset(grayMsb, 0xFF, EInkDisplay::BUFFER_SIZE);
+      
+      if (ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(),
+          EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT, grayLsb, grayMsb)) {
+        display.copyGrayscaleBuffers(grayLsb, grayMsb);
+        display.displayGrayBuffer(true);
+      } else {
+        Serial.printf("[%lu] showCoverPage: grayscale decode failed, falling back to BW\n", millis());
+        display.displayBuffer(EInkDisplay::FULL_REFRESH);
+      }
+    } else {
+      Serial.printf("[%lu] showCoverPage: OOM for grayscale buffers\n", millis());
+      ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(),
+          EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT);
+      display.displayBuffer(EInkDisplay::FULL_REFRESH);
+    }
+    
+    free(grayLsb);
+    free(grayMsb);
+  } else {
+    // Standard 1-bit rendering
+    Serial.printf("[%lu] showCoverPage: using standard BW rendering\n", millis());
+    ImageDecoder::decodeToDisplayFitWidth(coverPath.c_str(), display.getFrameBuffer(),
+        EInkDisplay::DISPLAY_WIDTH, EInkDisplay::DISPLAY_HEIGHT);
+    display.displayBuffer(EInkDisplay::FULL_REFRESH);
+  }
+  
+  showingCover = true;
+  return true;
 }

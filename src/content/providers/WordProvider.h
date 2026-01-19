@@ -123,6 +123,13 @@ class WordProvider {
   virtual TextAlign getParagraphAlignment() {
     return TextAlign::Left;
   }
+
+  // Returns the cover image path for this document (empty if none)
+  // extractIfMissing: if true, extract the cover from archive if needed
+  virtual String getCoverImagePath(bool extractIfMissing = true) {
+    (void)extractIfMissing;
+    return String("");
+  }
 };
 
 #endif

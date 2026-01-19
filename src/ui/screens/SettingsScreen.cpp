@@ -167,44 +167,47 @@ void SettingsScreen::toggleCurrentSetting() {
     case 10:  // Cover Quality
       coverQualityIndex = 1 - coverQualityIndex;
       break;
-    case 11:  // Orientation
+    case 11:  // Show Book Cover
+      showBookCoverIndex = 1 - showBookCoverIndex;
+      break;
+    case 12:  // Orientation
       orientationIndex++;
       if (orientationIndex >= 2)  // Portrait, Landscape only
         orientationIndex = 0;
       break;
-    case 12:  // Time to Sleep
+    case 13:  // Time to Sleep
       sleepTimeoutIndex++;
       if (sleepTimeoutIndex >= 5)
         sleepTimeoutIndex = 0;
       break;
-    case 13:  // Clock
+    case 14:  // Clock
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::ClockSettings);
       return;
       break;
-    case 14:  // WiFi Setup
+    case 15:  // WiFi Setup
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::WifiSettings);
       return;
       break;
-    case 15:  // Clear Cache
+    case 16:  // Clear Cache
       clearCacheStatus = uiManager.clearEpubCache() ? 1 : 0;
       break;
-    case 16:  // Startup
+    case 17:  // Startup
       startupBehaviorIndex = 1 - startupBehaviorIndex;
       break;
-    case 17:  // Refresh Passes
+    case 18:  // Refresh Passes
       refreshPassesIndex++;
       if (refreshPassesIndex >= refreshPassesValuesCount)
         refreshPassesIndex = 0;
       applyRefreshPasses();
       break;
-    case 18:  // Refresh Frequency
+    case 19:  // Refresh Frequency
       refreshFrequencyIndex++;
       if (refreshFrequencyIndex >= refreshFrequencyValuesCount)
         refreshFrequencyIndex = 0;
       break;
-    case 19:  // Custom Font
+    case 20:  // Custom Font
       saveSettings();
       uiManager.showScreen(UIManager::ScreenId::FontSelect);
       return;
@@ -297,6 +300,12 @@ void SettingsScreen::loadSettings() {
     coverQualityIndex = coverQuality;
   }
 
+  // Load show book cover (0=Off, 1=On)
+  int showBookCover = 1;  // Default to on
+  if (s.getInt(String("settings.showBookCover"), showBookCover)) {
+    showBookCoverIndex = showBookCover;
+  }
+
   // Load reading orientation (0=Portrait, 1=Landscape CW, 2=Inverted, 3=Landscape CCW)
   int orientation = 0;
   if (s.getInt(String("settings.orientation"), orientation)) {
@@ -355,6 +364,7 @@ void SettingsScreen::saveSettings() {
   s.setInt(String("settings.uiFontSize"), uiFontSizeIndex);
   s.setInt(String("settings.sleepScreenMode"), sleepScreenModeIndex);
   s.setInt(String("settings.coverQuality"), coverQualityIndex);
+  s.setInt(String("settings.showBookCover"), showBookCoverIndex);
   s.setInt(String("settings.orientation"), orientationIndex);
   s.setInt(String("settings.sleepTimeout"), sleepTimeoutIndex);
   s.setInt(String("settings.startupBehavior"), startupBehaviorIndex);
@@ -391,22 +401,24 @@ String SettingsScreen::getSettingName(int index) {
     case 10:
       return "Cover Quality";
     case 11:
-      return "Orientation";
+      return "Book Cover";
     case 12:
-      return "Time to Sleep";
+      return "Orientation";
     case 13:
-      return "Clock";
+      return "Time to Sleep";
     case 14:
-      return "WiFi";
+      return "Clock";
     case 15:
-      return "Clear Cache";
+      return "WiFi";
     case 16:
-      return "Startup";
+      return "Clear Cache";
     case 17:
-      return "Refresh Passes";
+      return "Startup";
     case 18:
-      return "Refresh Frequency";
+      return "Refresh Passes";
     case 19:
+      return "Refresh Frequency";
+    case 20:
       return "Custom Font";
     default:
       return "";
@@ -467,6 +479,8 @@ String SettingsScreen::getSettingValue(int index) {
     case 10:
       return coverQualityIndex ? "Grayscale" : "Standard";
     case 11:
+      return showBookCoverIndex ? "On" : "Off";
+    case 12:
       switch (orientationIndex) {
         case 0:
           return "Portrait";
@@ -475,7 +489,7 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "Portrait";
       }
-    case 12:
+    case 13:
       switch (sleepTimeoutIndex) {
         case 0:
           return "1 min";
@@ -490,21 +504,21 @@ String SettingsScreen::getSettingValue(int index) {
         default:
           return "10 min";
       }
-    case 13:
-      return "Setup";
     case 14:
       return "Setup";
     case 15:
+      return "Setup";
+    case 16:
       if (clearCacheStatus < 0)
         return "Press";
       return clearCacheStatus ? "OK" : "FAIL";
-    case 16:
-      return startupBehaviorIndex ? "Resume" : "Home";
     case 17:
-      return String(refreshPassesValues[refreshPassesIndex]);
+      return startupBehaviorIndex ? "Resume" : "Home";
     case 18:
-      return String(refreshFrequencyValues[refreshFrequencyIndex]);
+      return String(refreshPassesValues[refreshPassesIndex]);
     case 19:
+      return String(refreshFrequencyValues[refreshFrequencyIndex]);
+    case 20:
       return getCustomFontDisplayName();
     default:
       return "";

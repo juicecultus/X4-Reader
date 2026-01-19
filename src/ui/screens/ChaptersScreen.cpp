@@ -10,6 +10,7 @@ ChaptersScreen::ChaptersScreen(EInkDisplay& display, TextRenderer& renderer, UIM
     : display(display), textRenderer(renderer), uiManager(uiManager) {}
 
 void ChaptersScreen::activate() {
+  buildFilteredChapterList();
   selectedIndex = 0;
 }
 
@@ -31,11 +32,28 @@ void ChaptersScreen::show() {
 }
 
 int ChaptersScreen::getChapterCount() const {
+  return filteredCount;
+}
+
+void ChaptersScreen::buildFilteredChapterList() {
+  filteredCount = 0;
   Screen* s = uiManager.getScreen(UIManager::ScreenId::TextViewer);
   TextViewerScreen* tv = static_cast<TextViewerScreen*>(s);
   if (!tv)
+    return;
+  
+  int totalChapters = tv->getChapterCount();
+  for (int i = 0; i < totalChapters && filteredCount < MAX_CHAPTERS; i++) {
+    if (!tv->isChapterEmpty(i)) {
+      filteredChapters[filteredCount++] = i;
+    }
+  }
+}
+
+int ChaptersScreen::getActualChapterIndex(int filteredIndex) const {
+  if (filteredIndex < 0 || filteredIndex >= filteredCount)
     return 0;
-  return tv->getChapterCount();
+  return filteredChapters[filteredIndex];
 }
 
 String ChaptersScreen::getChapterLabel(int index) const {
@@ -44,7 +62,8 @@ String ChaptersScreen::getChapterLabel(int index) const {
   if (!tv)
     return String("");
 
-  String name = tv->getChapterName(index);
+  int actualIndex = getActualChapterIndex(index);
+  String name = tv->getChapterName(actualIndex);
   if (name.length() == 0) {
     return String("Chapter ") + String(index + 1);
   }
@@ -143,6 +162,7 @@ void ChaptersScreen::confirm() {
   if (!tv)
     return;
 
-  tv->goToChapterStart(selectedIndex);
+  int actualIndex = getActualChapterIndex(selectedIndex);
+  tv->goToChapterStart(actualIndex);
   uiManager.showScreen(UIManager::ScreenId::TextViewer);
 }

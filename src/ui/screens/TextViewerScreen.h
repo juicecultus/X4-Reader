@@ -30,7 +30,16 @@ class TextViewerScreen : public Screen {
 
   int getChapterCount() const;
   String getChapterName(int chapterIndex) const;
+  bool isChapterEmpty(int chapterIndex) const;
   void goToChapterStart(int chapterIndex);
+  
+  // Cached non-empty chapter list (built once per book, saved to SD)
+  static constexpr int MAX_CACHED_CHAPTERS = 200;
+  int cachedNonEmptyChapters[MAX_CACHED_CHAPTERS];
+  int cachedNonEmptyCount = -1;  // -1 = not loaded yet
+  void buildNonEmptyChapterCache();
+  bool loadChapterCacheFromFile();
+  void saveChapterCacheToFile();
 
   void showPage();
 
@@ -80,6 +89,10 @@ class TextViewerScreen : public Screen {
   void unloadCustomFont();
   // Render page layout using TTF renderer
   void renderPageWithTtf(const LayoutStrategy::PageLayout& layout);
+  
+  // Cover display
+  bool showingCover = false;  // True when displaying cover instead of text
+  bool showCoverPage();       // Display cover image, returns true if cover was shown
 
   String noDocumentMessage;
 

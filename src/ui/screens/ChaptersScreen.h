@@ -26,12 +26,19 @@ class ChaptersScreen : public Screen {
 
   int getChapterCount() const;
   String getChapterLabel(int index) const;
+  void buildFilteredChapterList();
+  int getActualChapterIndex(int filteredIndex) const;
 
   EInkDisplay& display;
   TextRenderer& textRenderer;
   UIManager& uiManager;
 
   int selectedIndex = 0;
+  
+  // Filtered list of non-empty chapter indices
+  static constexpr int MAX_CHAPTERS = 200;
+  int filteredChapters[MAX_CHAPTERS];
+  int filteredCount = 0;
 };
 
 #endif
